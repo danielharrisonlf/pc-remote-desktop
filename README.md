@@ -2,6 +2,20 @@
 
 Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositório Windows independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.1.0, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md) e [validação](docs/TESTING.md).
 
+## Baixar e instalar — versão 0.1.0
+
+| Aplicativo | Download |
+|---|---|
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.1.0/pc-remote-desktop-0.1.0-x64-setup.exe) |
+| Android ARM64 — celular compatível | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.1.0/pc-remote-android-0.1.0-arm64-evaluation.apk) |
+| Android x86_64 — emulador | [Baixar APK para emulador](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.1.0/pc-remote-android-0.1.0-x86_64-evaluation.apk) |
+
+Os downloads estão nas Releases privadas: entre no GitHub com uma conta que tenha acesso aos dois repositórios. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.1.0) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.1.0) também incluem os hashes SHA-256.
+
+Instale o `.exe` no Windows e abra o PC Remote pela bandeja. No celular, abra o APK ARM64 pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte ambos à mesma rede local, inicie o pareamento no PC, escaneie o QR ou informe os dados exibidos e confirme o pedido no Windows. Os aplicativos instalados não precisam de Metro, Expo Go ou ferramentas de desenvolvimento.
+
+Esta é uma versão de avaliação: APK assinado com chave debug e instalador sem Authenticode. A validação em celular físico e players reais permanece pendente; consulte [testes e limitações](docs/TESTING.md).
+
 ## Desenvolvimento e instalação
 
 Windows 10 1809+ ou Windows 11, WebView2 Runtime, Node LTS >=22.11, Rust estável **MSVC x64**, Visual Studio Build Tools com Desktop Development with C++ e Windows SDK. O aplicativo usa a sessão do usuário; não precisa ser iniciado como administrador. MinGW não é o toolchain suportado para distribuir Tauri.
