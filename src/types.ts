@@ -20,10 +20,12 @@ export interface Settings {
   download: boolean;
   paused: boolean;
   autostart: boolean;
+  allowInput: boolean;
 }
 
 export interface DesktopStatus {
   serviceRunning: boolean;
+  inputActive: boolean;
   pcId: string;
   pcName: string;
   addresses: string[];

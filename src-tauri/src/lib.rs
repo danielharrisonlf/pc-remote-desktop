@@ -2,6 +2,7 @@ mod audio;
 mod clipboard;
 mod connection;
 mod core;
+mod input;
 mod media;
 mod pairing;
 mod protocol;
@@ -43,6 +44,10 @@ fn update_settings(
 ) -> Result<(), String> {
     core.update_settings(settings)
 }
+#[tauri::command]
+fn stop_input(core: tauri::State<'_, Arc<Core>>) {
+    core.stop_input();
+}
 
 pub fn run() {
     tauri::Builder::default()
@@ -57,7 +62,8 @@ pub fn run() {
             start_pairing,
             approve_pairing,
             revoke_device,
-            update_settings
+            update_settings,
+            stop_input
         ])
         .setup(|app| {
             let identity =
@@ -101,7 +107,14 @@ pub fn run() {
                 None::<&str>,
             )?;
             let quit = MenuItem::with_id(app, "quit", "Encerrar", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &pause, &quit])?;
+            let stop_input_item = MenuItem::with_id(
+                app,
+                "stop_input",
+                "Desativar mouse e teclado",
+                true,
+                None::<&str>,
+            )?;
+            let menu = Menu::with_items(app, &[&show, &pause, &stop_input_item, &quit])?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
@@ -118,6 +131,7 @@ pub fn run() {
                         settings.paused = !settings.paused;
                         let _ = state.update_settings(settings);
                     }
+                    "stop_input" => app.state::<Arc<Core>>().stop_input(),
                     "quit" => app.exit(0),
                     _ => {}
                 })

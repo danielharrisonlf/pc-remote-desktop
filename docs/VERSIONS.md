@@ -4,7 +4,7 @@ Os lockfiles são a referência exata de todas as dependências transitivas. As 
 
 | Componente | Versão |
 |---|---|
-| Aplicativos / protocolo | 0.1.0 / 1 |
+| Aplicativos / protocolo | 0.2.0 / 1 + extensão opcional input.v1 |
 | Node / npm | 24.21.0 / 11.19.0 |
 | Android React Native / React | 0.87.1 / 19.2.3 |
 | React Native Community CLI | 20.2.0 |

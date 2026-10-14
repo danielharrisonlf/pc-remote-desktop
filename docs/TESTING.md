@@ -2,7 +2,25 @@
 
 O código contém integrações nativas reais. Testes unitários não comprovam compatibilidade de cada player, permissões do Android nem continuidade durante suspensão. Este registro distingue execução automatizada, execução no Windows deste ambiente e validações pendentes em Android físico.
 
-## Resultados desta entrega — 14/10/2026
+## Validação da versão 0.2.0 — touchpad e teclado
+
+| Verificação | Resultado |
+|---|---|
+| Android | TypeScript estrito passou; 18 testes Jest passaram, incluindo movimento acumulado/fracionário, descarte de fila, Unicode/limites e ACK tardio após desativação |
+| Desktop | TypeScript, Vite e 2 testes Vitest passaram |
+| Rust | 20 testes passaram; 3 smokes nativos ignorados por padrão. Migração de preferências não concede entrada; execução após desativar/revogar é rejeitada |
+| Protocolo real TLS/WebSocket | Cliente legado continua sem campos/capacidades extras; cliente input.v1 recebe estado opcional; comandos sem permissão são rejeitados |
+| Entrada nativa real no Windows | Smoke SendInput moveu o cursor e restaurou a posição anterior |
+| Windows + emulador API36 | Pareamento, capacidade input.v1, ativação explícita e desativação ao pressionar Home confirmados |
+| Inicialização com credencial salva | Recepção de welcome/state após iniciar o APK sem Metro confirmada; conexão espera os listeners JS para não perder o estado inicial |
+| Ciclo de vida Android nativo | Pause/destroy enviam disable sem depender do JS; requests de entrada são bloqueados até a retomada ser reconhecida pelo store |
+| Artefatos | APKs ARM64/x86_64 release e instalador Windows x64 gerados; assinatura de avaliação dos APKs verificada |
+
+A revisão independente apontou o risco de entrada durante suspensão do JS. O integrador corrigiu o bloqueio nativo, separou a confirmação de retomada do clipboard e validou a inicialização com credencial salva. Agentes de frontend e testes atingiram limite de uso; os ajustes finais foram concluídos pelo integrador.
+
+Ainda pendentes: validação em celular físico; precisão/latência em Wi-Fi real; digitação e teclas em vários aplicativos/IMEs; clique duplo, rolagem e recusas por UIPI/UAC em hardware do usuário. A tentativa de digitação em janela descartável não é tratada como sucesso sem leitura de resultado. O escopo não inclui transmissão de tela, arrastar com botão mantido ou atalhos com modificadores. Builds permanecem de avaliação, sem assinatura de produção.
+
+## Resultados da versão 0.1.0 — 14/10/2026
 
 | Verificação | Resultado |
 |---|---|

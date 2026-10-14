@@ -1,30 +1,397 @@
 {
   "protocolVersion": 1,
   "client": [
-    {"v":1,"type":"pair.request","id":"a44a8701-91d6-4497-8eb5-9300a18bf631","deviceId":"ec36d5c4-764d-4562-8245-1bd8d8959c85","deviceName":"Android de teste","code":"12345678"},
-    {"v":1,"type":"hello","id":"a44a8701-91d6-4497-8eb5-9300a18bf632","deviceId":"ec36d5c4-764d-4562-8245-1bd8d8959c85","token":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
-    {"v":1,"type":"request","id":"a44a8701-91d6-4497-8eb5-9300a18bf633","action":{"kind":"volume.set","percent":35}},
-    {"v":1,"type":"request","id":"a44a8701-91d6-4497-8eb5-9300a18bf634","action":{"kind":"volume.step","delta":-5}},
-    {"v":1,"type":"request","id":"a44a8701-91d6-4497-8eb5-9300a18bf635","action":{"kind":"volume.mute","muted":true}},
-    {"v":1,"type":"request","id":"a44a8701-91d6-4497-8eb5-9300a18bf636","action":{"kind":"media.control","sessionId":"session-1","command":"seek","offsetSeconds":10}},
-    {"v":1,"type":"request","id":"a44a8701-91d6-4497-8eb5-9300a18bf637","action":{"kind":"clipboard.set","eventId":"db373ada-f6d4-4eb6-a05a-b98e870e8cee","origin":"android","text":"Olá, ação 👋\nhttps://example.org","automatic":false,"baseRevision":0}},
-    {"v":1,"type":"request","id":"a44a8701-91d6-4497-8eb5-9300a18bf638","action":{"kind":"clipboard.get"}},
-    {"v":1,"type":"request","id":"a44a8701-91d6-4497-8eb5-9300a18bf639","action":{"kind":"sync.set","upload":false,"download":false,"paused":false}},
-    {"v":1,"type":"request","id":"a44a8701-91d6-4497-8eb5-9300a18bf63a","action":{"kind":"state.get"}}
+    {
+      "v": 1,
+      "type": "pair.request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf631",
+      "deviceId": "ec36d5c4-764d-4562-8245-1bd8d8959c85",
+      "deviceName": "Android de teste",
+      "code": "12345678"
+    },
+    {
+      "v": 1,
+      "type": "hello",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf632",
+      "deviceId": "ec36d5c4-764d-4562-8245-1bd8d8959c85",
+      "token": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf633",
+      "action": {
+        "kind": "volume.set",
+        "percent": 35
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf634",
+      "action": {
+        "kind": "volume.step",
+        "delta": -5
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf635",
+      "action": {
+        "kind": "volume.mute",
+        "muted": true
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf636",
+      "action": {
+        "kind": "media.control",
+        "sessionId": "session-1",
+        "command": "seek",
+        "offsetSeconds": 10
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf637",
+      "action": {
+        "kind": "clipboard.set",
+        "eventId": "db373ada-f6d4-4eb6-a05a-b98e870e8cee",
+        "origin": "android",
+        "text": "Olá, ação 👋\nhttps://example.org",
+        "automatic": false,
+        "baseRevision": 0
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf638",
+      "action": {
+        "kind": "clipboard.get"
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf639",
+      "action": {
+        "kind": "sync.set",
+        "upload": false,
+        "download": false,
+        "paused": false
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf63a",
+      "action": {
+        "kind": "state.get"
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf680",
+      "action": {
+        "kind": "input.enable",
+        "enabled": true
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf681",
+      "action": {
+        "kind": "pointer.move",
+        "dx": 24,
+        "dy": -12
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf682",
+      "action": {
+        "kind": "pointer.click",
+        "button": "left",
+        "count": 2
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf683",
+      "action": {
+        "kind": "pointer.scroll",
+        "steps": -1
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf684",
+      "action": {
+        "kind": "keyboard.text",
+        "text": "Olá, ação 👋 漢字"
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf685",
+      "action": {
+        "kind": "keyboard.key",
+        "key": "enter"
+      }
+    }
   ],
   "server": [
-    {"v":1,"type":"pair.pending","id":"a44a8701-91d6-4497-8eb5-9300a18bf631"},
-    {"v":1,"type":"pair.result","id":"a44a8701-91d6-4497-8eb5-9300a18bf631","pcId":"36c7f5c2-9a39-43a5-a541-082f745dfd01","pcName":"PC de teste","token":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
-    {"v":1,"type":"welcome","id":"a44a8701-91d6-4497-8eb5-9300a18bf632","pcId":"36c7f5c2-9a39-43a5-a541-082f745dfd01","pcName":"PC de teste","capabilities":["audio","media","clipboard.text"]},
-    {"v":1,"type":"ack","id":"a44a8701-91d6-4497-8eb5-9300a18bf633"},
-    {"v":1,"type":"error","id":"a44a8701-91d6-4497-8eb5-9300a18bf636","code":"unavailable","message":"Player não permite alterar posição.","retryable":false},
-    {"v":1,"type":"state","revision":1,"audio":{"available":true,"percent":35,"muted":false,"error":null},"media":{"sessions":[{"id":"session-1","app":"player-id","title":"Título","playing":true,"capabilities":{"play":true,"pause":true,"previous":false,"next":false,"seek":true},"positionSeconds":20}]},"clipboardRevision":0,"sync":{"upload":false,"download":false,"paused":false}},
-    {"v":1,"type":"clipboard.event","eventId":"db373ada-f6d4-4eb6-a05a-b98e870e8cee","origin":"windows","revision":1,"text":"Olá, ação 👋\nhttps://example.org","automatic":false}
+    {
+      "v": 1,
+      "type": "pair.pending",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf631"
+    },
+    {
+      "v": 1,
+      "type": "pair.result",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf631",
+      "pcId": "36c7f5c2-9a39-43a5-a541-082f745dfd01",
+      "pcName": "PC de teste",
+      "token": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    {
+      "v": 1,
+      "type": "welcome",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf632",
+      "pcId": "36c7f5c2-9a39-43a5-a541-082f745dfd01",
+      "pcName": "PC de teste",
+      "capabilities": [
+        "audio",
+        "media",
+        "clipboard.text"
+      ]
+    },
+    {
+      "v": 1,
+      "type": "ack",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf633"
+    },
+    {
+      "v": 1,
+      "type": "error",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf636",
+      "code": "unavailable",
+      "message": "Player não permite alterar posição.",
+      "retryable": false
+    },
+    {
+      "v": 1,
+      "type": "state",
+      "revision": 1,
+      "audio": {
+        "available": true,
+        "percent": 35,
+        "muted": false,
+        "error": null
+      },
+      "media": {
+        "sessions": [
+          {
+            "id": "session-1",
+            "app": "player-id",
+            "title": "Título",
+            "playing": true,
+            "capabilities": {
+              "play": true,
+              "pause": true,
+              "previous": false,
+              "next": false,
+              "seek": true
+            },
+            "positionSeconds": 20
+          }
+        ]
+      },
+      "clipboardRevision": 0,
+      "sync": {
+        "upload": false,
+        "download": false,
+        "paused": false
+      }
+    },
+    {
+      "v": 1,
+      "type": "clipboard.event",
+      "eventId": "db373ada-f6d4-4eb6-a05a-b98e870e8cee",
+      "origin": "windows",
+      "revision": 1,
+      "text": "Olá, ação 👋\nhttps://example.org",
+      "automatic": false
+    },
+    {
+      "v": 1,
+      "type": "welcome",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf632",
+      "pcId": "36c7f5c2-9a39-43a5-a541-082f745dfd01",
+      "pcName": "PC de teste",
+      "capabilities": [
+        "audio",
+        "media",
+        "clipboard.text",
+        "input.control"
+      ]
+    },
+    {
+      "v": 1,
+      "type": "state",
+      "revision": 1,
+      "audio": {
+        "available": true,
+        "percent": 35,
+        "muted": false,
+        "error": null
+      },
+      "media": {
+        "sessions": [
+          {
+            "id": "session-1",
+            "app": "player-id",
+            "title": "Título",
+            "playing": true,
+            "capabilities": {
+              "play": true,
+              "pause": true,
+              "previous": false,
+              "next": false,
+              "seek": true
+            },
+            "positionSeconds": 20
+          }
+        ]
+      },
+      "clipboardRevision": 0,
+      "sync": {
+        "upload": false,
+        "download": false,
+        "paused": false
+      },
+      "input": {
+        "allowed": true,
+        "enabled": false
+      }
+    }
   ],
   "invalidClient": [
-    {"v":1,"type":"request","id":"a44a8701-91d6-4497-8eb5-9300a18bf633","action":{"kind":"volume.set","percent":101}},
-    {"v":1,"type":"request","id":"a44a8701-91d6-4497-8eb5-9300a18bf633","action":{"kind":"media.control","sessionId":"session-1","command":"seek","offsetSeconds":99}},
-    {"v":1,"type":"request","id":"a44a8701-91d6-4497-8eb5-9300a18bf633","action":{"kind":"shell.execute","command":"whoami"}},
-    {"v":1,"type":"request","id":"a44a8701-91d6-4497-8eb5-9300a18bf633","action":{"kind":"volume.mute","muted":true,"unexpected":true}}
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf633",
+      "action": {
+        "kind": "volume.set",
+        "percent": 101
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf633",
+      "action": {
+        "kind": "media.control",
+        "sessionId": "session-1",
+        "command": "seek",
+        "offsetSeconds": 99
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf633",
+      "action": {
+        "kind": "shell.execute",
+        "command": "whoami"
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf633",
+      "action": {
+        "kind": "volume.mute",
+        "muted": true,
+        "unexpected": true
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf780",
+      "action": {
+        "kind": "pointer.move",
+        "dx": 513,
+        "dy": 0
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf781",
+      "action": {
+        "kind": "pointer.move",
+        "dx": 0,
+        "dy": 0
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf782",
+      "action": {
+        "kind": "pointer.click",
+        "button": "right",
+        "count": 2
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf783",
+      "action": {
+        "kind": "pointer.scroll",
+        "steps": 0
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf784",
+      "action": {
+        "kind": "keyboard.key",
+        "key": "win"
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf785",
+      "action": {
+        "kind": "keyboard.text",
+        "text": "linha\ncom controle"
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf786",
+      "action": {
+        "kind": "keyboard.text",
+        "text": ""
+      }
+    }
   ]
 }

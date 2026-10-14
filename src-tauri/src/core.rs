@@ -1,7 +1,7 @@
 pub use crate::pairing::{Pairing, Pending, PendingView};
 use crate::{
     audio, clipboard, media,
-    protocol::{self, AudioState, MediaState, StateSnapshot, SyncSettings},
+    protocol::{self, Action, AudioState, InputState, MediaState, StateSnapshot, SyncSettings},
     secrets::{self, Secrets},
     settings::{self, Settings},
 };
@@ -41,6 +41,8 @@ pub struct Status {
     pub pending: Vec<PendingView>,
     pub settings: Settings,
     pub diagnostics: Vec<String>,
+    #[serde(rename = "inputActive")]
+    pub input_active: bool,
 }
 #[derive(Clone)]
 pub enum Outgoing {
@@ -69,6 +71,9 @@ pub struct Runtime {
     pub event_ids: VecDeque<Uuid>,
     pub event_set: HashSet<Uuid>,
     pub client_sync: SyncSettings,
+    pub input_feature: bool,
+    pub input_enabled: bool,
+    pub input_events: VecDeque<Instant>,
     pub diagnostics: VecDeque<String>,
 }
 pub struct Core {
@@ -142,6 +147,9 @@ impl Core {
                 event_ids: VecDeque::new(),
                 event_set: HashSet::new(),
                 client_sync: SyncSettings::default(),
+                input_feature: false,
+                input_enabled: false,
+                input_events: VecDeque::new(),
                 diagnostics: VecDeque::new(),
             }),
             events,
@@ -185,9 +193,15 @@ impl Core {
                 .collect(),
             settings: s.settings.clone(),
             diagnostics: s.diagnostics.iter().cloned().collect(),
+            input_active: s.input_enabled,
         }
     }
-    pub fn connect_authenticated(&self, id: Uuid, token: &str) -> Result<u64, &'static str> {
+    pub fn connect_authenticated(
+        &self,
+        id: Uuid,
+        token: &str,
+        input_feature: bool,
+    ) -> Result<u64, &'static str> {
         if id.is_nil() || token.len() != 64 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err("unauthorized");
         }
@@ -210,6 +224,9 @@ impl Core {
         s.connected = Some(id);
         s.connection_epoch = s.connection_epoch.wrapping_add(1);
         s.client_sync = SyncSettings::default();
+        s.input_feature = input_feature;
+        s.input_enabled = false;
+        s.input_events.clear();
         Ok(s.connection_epoch)
     }
     pub fn is_authorized_session(&self, id: Uuid, epoch: u64) -> bool {
@@ -228,6 +245,9 @@ impl Core {
         if s.connected == Some(id) && s.connection_epoch == epoch {
             s.connected = None;
             s.client_sync = SyncSettings::default();
+            s.input_feature = false;
+            s.input_enabled = false;
+            s.input_events.clear();
         }
     }
     pub fn revoke(&self, id: Uuid) -> Result<(), String> {
@@ -242,6 +262,9 @@ impl Core {
         }
         if s.connected == Some(id) {
             s.connected = None;
+            s.input_feature = false;
+            s.input_enabled = false;
+            s.input_events.clear();
             let _ = self.events.send(Outgoing::Close { device_id: id });
         }
         Ok(())
@@ -251,6 +274,10 @@ impl Core {
         settings::save(&new)?;
         let mut s = self.state.lock().unwrap();
         s.settings = new;
+        if !s.settings.allow_input {
+            s.input_enabled = false;
+            s.input_events.clear();
+        }
         s.revision += 1;
         self.publish_state_locked(&s);
         Ok(())
@@ -268,7 +295,79 @@ impl Core {
             media: s.media.clone(),
             clipboard_revision: s.clipboard_revision,
             sync: s.client_sync.clone(),
+            input: s.input_feature.then_some(InputState {
+                allowed: s.settings.allow_input,
+                enabled: s.input_enabled,
+            }),
         }
+    }
+    pub fn input_active(&self, id: Uuid, epoch: u64) -> bool {
+        let s = self.state.lock().unwrap();
+        s.connected == Some(id)
+            && s.connection_epoch == epoch
+            && s.input_feature
+            && s.input_enabled
+            && s.settings.allow_input
+    }
+    pub fn input_enable(&self, id: Uuid, epoch: u64, enabled: bool) -> Result<(), String> {
+        let mut s = self.state.lock().unwrap();
+        if s.connected != Some(id)
+            || s.connection_epoch != epoch
+            || !s.secrets.devices.iter().any(|d| d.id == id)
+        {
+            return Err("unauthorized".into());
+        }
+        if !s.input_feature || (enabled && !s.settings.allow_input) {
+            return Err("unavailable".into());
+        }
+        if s.input_enabled != enabled {
+            s.input_enabled = enabled;
+            s.input_events.clear();
+            s.revision += 1;
+            self.publish_state_locked(&s);
+        }
+        Ok(())
+    }
+    pub fn stop_input(&self) {
+        let mut s = self.state.lock().unwrap();
+        if s.input_feature {
+            s.input_enabled = false;
+            s.input_events.clear();
+            // Invalidate already queued enable requests as well as input events.
+            // Credentials stay valid; reconnection starts a fresh disarmed epoch.
+            s.input_feature = false;
+            s.client_sync = SyncSettings::default();
+            s.connection_epoch = s.connection_epoch.wrapping_add(1);
+            if let Some(device_id) = s.connected.take() {
+                let _ = self.events.send(Outgoing::Close { device_id });
+            }
+            s.revision += 1;
+        }
+    }
+    pub fn execute_input(&self, id: Uuid, epoch: u64, action: &Action) -> Result<(), String> {
+        let mut s = self.state.lock().unwrap();
+        if s.connected != Some(id)
+            || s.connection_epoch != epoch
+            || !s.secrets.devices.iter().any(|d| d.id == id)
+        {
+            return Err("unauthorized".into());
+        }
+        if !s.input_feature || !s.input_enabled || !s.settings.allow_input {
+            return Err("unavailable".into());
+        }
+        let now = Instant::now();
+        while s
+            .input_events
+            .front()
+            .is_some_and(|old| now.duration_since(*old).as_secs_f64() >= 1.0)
+        {
+            s.input_events.pop_front();
+        }
+        if s.input_events.len() >= 120 {
+            return Err("rate_limited".into());
+        }
+        s.input_events.push_back(now);
+        crate::input::execute(action).map_err(str::to_string)
     }
     fn publish_state_locked(&self, s: &Runtime) {
         if let Some(id) = s.connected {
@@ -438,6 +537,9 @@ impl Core {
         if let Some(device_id) = s.connected.take() {
             s.connection_epoch = s.connection_epoch.wrapping_add(1);
             s.client_sync = SyncSettings::default();
+            s.input_feature = false;
+            s.input_enabled = false;
+            s.input_events.clear();
             let _ = self.events.send(Outgoing::Close { device_id });
             drop(s);
             self.diagnostic(
@@ -483,7 +585,7 @@ mod tests {
     use super::*;
     use crate::secrets::Device;
     fn test_core() -> Arc<Core> {
-        Core::build(
+        Core::ephemeral(
             Secrets {
                 pc_id: Uuid::new_v4(),
                 certificate_pem: String::new(),
@@ -491,7 +593,6 @@ mod tests {
                 devices: Vec::new(),
             },
             "00".into(),
-            false,
         )
     }
     #[test]
@@ -513,8 +614,8 @@ mod tests {
             name: "Test".into(),
             token_hash: secrets::token_hash(&token),
         });
-        let old = core.connect_authenticated(id, &token).unwrap();
-        let new = core.connect_authenticated(id, &token).unwrap();
+        let old = core.connect_authenticated(id, &token, false).unwrap();
+        let new = core.connect_authenticated(id, &token, false).unwrap();
         core.disconnect(id, old);
         assert!(core.is_authorized_session(id, new));
         assert!(!core.is_authorized_session(id, old));
@@ -529,13 +630,13 @@ mod tests {
             name: "Resume test".into(),
             token_hash: secrets::token_hash(&token),
         });
-        let epoch = core.connect_authenticated(id, &token).unwrap();
+        let epoch = core.connect_authenticated(id, &token, false).unwrap();
         let now = unsafe { windows::Win32::System::SystemInformation::GetTickCount64() };
         core.last_live_tick
             .store(now.saturating_sub(6_000), Ordering::Release);
         core.check_resume();
         assert!(!core.is_authorized_session(id, epoch));
-        assert!(core.connect_authenticated(id, &token).is_ok());
+        assert!(core.connect_authenticated(id, &token, false).is_ok());
     }
     #[test]
     fn pairing_approval_and_revocation() {
@@ -551,11 +652,57 @@ mod tests {
         let (_, token) = core
             .pair_complete(device, "Android".into(), generation)
             .unwrap();
-        assert!(core.connect_authenticated(device, &token).is_ok());
-        assert!(core.connect_authenticated(device, &token).is_ok());
+        assert!(core.connect_authenticated(device, &token, false).is_ok());
+        assert!(core.connect_authenticated(device, &token, false).is_ok());
         core.revoke(device).unwrap();
         assert!(!core.is_authorized_connection(device));
-        assert!(core.connect_authenticated(device, &token).is_err());
+        assert!(core.connect_authenticated(device, &token, false).is_err());
+    }
+    #[test]
+    fn input_needs_feature_pc_consent_and_fresh_session_activation() {
+        let core = test_core();
+        let id = Uuid::new_v4();
+        let token = random_hex();
+        core.state.lock().unwrap().secrets.devices.push(Device {
+            id,
+            name: "Input test".into(),
+            token_hash: secrets::token_hash(&token),
+        });
+        let old = core.connect_authenticated(id, &token, false).unwrap();
+        assert!(core.snapshot().input.is_none());
+        assert_eq!(core.input_enable(id, old, true), Err("unavailable".into()));
+        let fresh = core.connect_authenticated(id, &token, true).unwrap();
+        assert!(core.snapshot().input.is_some());
+        assert_eq!(
+            core.input_enable(id, fresh, true),
+            Err("unavailable".into())
+        );
+        core.state.lock().unwrap().settings.allow_input = true;
+        core.input_enable(id, fresh, true).unwrap();
+        assert!(core.input_active(id, fresh));
+        core.stop_input();
+        assert!(!core.input_active(id, fresh));
+        assert_eq!(
+            core.execute_input(id, fresh, &Action::PointerMove { dx: 1, dy: 0 }),
+            Err("unauthorized".into())
+        );
+        assert_eq!(core.input_enable(id, fresh, true), Err("unauthorized".into()));
+        let fresh = core.connect_authenticated(id, &token, true).unwrap();
+        assert!(!core.input_active(id, fresh));
+        core.input_enable(id, fresh, true).unwrap();
+        let replacement = core.connect_authenticated(id, &token, true).unwrap();
+        assert!(!core.input_active(id, replacement));
+        assert_eq!(
+            core.input_enable(id, fresh, true),
+            Err("unauthorized".into())
+        );
+        core.input_enable(id, replacement, true).unwrap();
+        core.revoke(id).unwrap();
+        assert!(!core.input_active(id, replacement));
+        assert_eq!(
+            core.execute_input(id, replacement, &Action::PointerMove { dx: 1, dy: 0 }),
+            Err("unauthorized".into())
+        );
     }
     #[test]
     fn old_pairing_approval_is_invalid() {

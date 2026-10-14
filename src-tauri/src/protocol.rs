@@ -80,6 +80,55 @@ pub enum Action {
         download: bool,
         paused: bool,
     },
+    #[serde(rename = "input.enable")]
+    InputEnable { enabled: bool },
+    #[serde(rename = "pointer.move")]
+    PointerMove { dx: i16, dy: i16 },
+    #[serde(rename = "pointer.click")]
+    PointerClick { button: PointerButton, count: u8 },
+    #[serde(rename = "pointer.scroll")]
+    PointerScroll { steps: i8 },
+    #[serde(rename = "keyboard.text")]
+    KeyboardText { text: String },
+    #[serde(rename = "keyboard.key")]
+    KeyboardKey { key: KeyboardKey },
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PointerButton {
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum KeyboardKey {
+    Enter,
+    Backspace,
+    Tab,
+    Escape,
+    Left,
+    Right,
+    Up,
+    Down,
+    Delete,
+    Home,
+    End,
+}
+
+impl Action {
+    pub fn is_input(&self) -> bool {
+        matches!(
+            self,
+            Self::InputEnable { .. }
+                | Self::PointerMove { .. }
+                | Self::PointerClick { .. }
+                | Self::PointerScroll { .. }
+                | Self::KeyboardText { .. }
+                | Self::KeyboardKey { .. }
+        )
+    }
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -122,6 +171,26 @@ pub fn validate_action(action: &Action) -> Result<(), &'static str> {
         }
         Action::ClipboardSet { text, .. } if text.as_bytes().len() > MAX_TEXT => Err("too_large"),
         Action::ClipboardSet { text, .. } if text.contains('\0') => Err("invalid_message"),
+        Action::PointerMove { dx, dy }
+            if (*dx == 0 && *dy == 0) || dx.unsigned_abs() > 512 || dy.unsigned_abs() > 512 =>
+        {
+            Err("invalid_message")
+        }
+        Action::PointerClick { button, count }
+            if *count == 0
+                || *count > 2
+                || (matches!(button, PointerButton::Right) && *count != 1) =>
+        {
+            Err("invalid_message")
+        }
+        Action::PointerScroll { steps } if *steps == 0 || steps.unsigned_abs() > 10 => {
+            Err("invalid_message")
+        }
+        Action::KeyboardText { text }
+            if text.is_empty() || text.len() > 1024 || text.chars().any(char::is_control) =>
+        {
+            Err("invalid_message")
+        }
         _ => Ok(()),
     }
 }
@@ -177,6 +246,14 @@ pub struct StateSnapshot {
     #[serde(rename = "clipboardRevision")]
     pub clipboard_revision: u64,
     pub sync: SyncSettings,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<InputState>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InputState {
+    pub allowed: bool,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -258,5 +335,36 @@ mod tests {
     fn escaped_unicode_frame_fits_limit() {
         let value = serde_json::json!({"v":1,"type":"request","id":Uuid::new_v4(),"action":{"kind":"clipboard.set","eventId":Uuid::new_v4(),"origin":"android","text":"\u{001f}".repeat(MAX_TEXT),"automatic":false,"baseRevision":0}});
         assert!(value.to_string().len() <= MAX_FRAME);
+    }
+    #[test]
+    fn input_validation_rejects_oversized_motion_text_controls_and_unknown_keys() {
+        for action in [
+            Action::PointerMove {
+                dx: i16::MIN,
+                dy: 0,
+            },
+            Action::PointerMove { dx: 0, dy: 0 },
+            Action::PointerScroll { steps: i8::MIN },
+            Action::PointerClick {
+                button: PointerButton::Right,
+                count: 2,
+            },
+            Action::KeyboardText {
+                text: "abc\n".into(),
+            },
+            Action::KeyboardText {
+                text: "a".repeat(1025),
+            },
+        ] {
+            assert!(validate_action(&action).is_err());
+        }
+        let value = serde_json::json!({"v":1,"type":"request","id":Uuid::new_v4(),"action":{"kind":"keyboard.key","key":"power"}});
+        assert!(serde_json::from_value::<ClientMessage>(value).is_err());
+        assert_eq!(
+            validate_action(&Action::KeyboardText {
+                text: "á🦊".into()
+            }),
+            Ok(())
+        );
     }
 }

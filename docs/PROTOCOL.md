@@ -1,4 +1,4 @@
-# PC Remote Protocol 1 — aplicativo 0.1.0
+# PC Remote Protocol 1 — aplicativos 0.1.x / 0.2.x
 
 Contrato normativo, copiado integralmente nos dois repositórios. Transporte WSS/TLS 1.2+ na LAN, porta TCP 43127; descoberta mDNS `_pcremote._tcp.local.`. A descoberta informa endereço/nome, nunca estabelece confiança. UTF-8 JSON, limite de frame 512 KiB (inclui expansão de escape JSON de textos de 64 KiB), texto 64 KiB UTF-8, sem NUL. Versão incompatível é rejeitada. Cada mensagem tem `v:1`; IDs são UUIDs. Campos desconhecidos em comandos são rejeitados.
 
@@ -50,6 +50,27 @@ Ack confirma execução, nunca apenas enfileiramento. Erros: `invalid_message`, 
 
 Estado não inclui conteúdo do clipboard. Snapshot após hello/reconexão não transfere clipboard existente. Revision monotônica por execução do PC, não timestamp. Android aceita somente snapshots mais recentes na conexão; durante arraste mantém valor local, limita envio a 10 Hz, envia valor final e aguarda ack final antes de adotar estado remoto.
 
+## Extensão negociada input.v1 — aplicativos 0.2.0
+
+O Android solicita a extensão no upgrade WebSocket com `X-PC-Remote-Features: input.v1`. O header não concede acesso; autorização permanece pelo token individual dentro do TLS validado. Hello não muda. Desktop antigo ignora o header. Desktop novo só inclui `input.control` no welcome e o campo opcional `input` nos snapshots de uma conexão que negociou a extensão. Clientes antigos recebem exatamente as capacidades e formato antigos.
+
+Snapshot negociado acrescenta `"input":{"allowed":false,"enabled":false}`. `allowed` indica a permissão local do Windows; `enabled` indica ativação nesta conexão. Ambos começam falsos. A permissão pode ser persistida pelo PC, mas a ativação nunca é persistida. Revogação, troca de conexão, suspensão, desconexão e bloqueio no PC limpam a ativação. A ação de emergência no PC invalida o epoch e encerra a conexão para impedir reativação por requests antigos; as credenciais continuam válidas. O Android desativa e descarta fila ao perder foco; ao retomar requer nova ação explícita.
+
+| kind | Campos | Limites / resultado |
+|---|---|---|
+| input.enable | enabled: boolean | Exige negociação e permissão do PC para ativar; false interrompe a sessão |
+| pointer.move | dx,dy: inteiros | −512..512 cada; vetor não pode ser zero; movimento relativo |
+| pointer.click | button: left/right; count: inteiro | 1 ou 2; right aceita somente 1; down/up no mesmo lote |
+| pointer.scroll | steps: inteiro | −10..10 sem zero; positivo sobe, negativo desce; 120 unidades de roda por passo |
+| keyboard.text | text: string | 1..1.024 bytes UTF-8; Unicode sem caracteres de controle; UTF-16 down/up via SendInput |
+| keyboard.key | key: enum | enter,backspace,tab,escape,left,right,up,down,delete,home,end; toque completo sem tecla mantida |
+
+Todo evento exige sessão autenticada, extensão negociada, permissão e ativação verificadas imediatamente antes da execução nativa. A API não aceita scripts, keycodes arbitrários, sequências de modificadores nem comandos de shell. O alvo é a janela em foco no Windows; só o envio explícito de texto injeta texto e não modifica clipboard. Não há captura de tela nem histórico de digitação.
+
+Ack de movimento/clique/rolagem/teclado não carrega snapshot completo. O Android coalesce movimento, mantém no máximo uma solicitação em voo e descarta pendências ao invalidar a conexão/ativação; nunca repete automaticamente um evento com erro ou timeout. O servidor limita a frequência e conserva IDs já usados com memória limitada; a sessão continua sujeita ao timeout de uma hora e requer nova ativação após reconectar. Falha parcial de SendInput é erro sem retry, pois repetir texto poderia duplicá-lo.
+
+SendInput pode ser bloqueado por UIPI, aplicativos elevados ou tela protegida; quantidade inserida é verificada, sem prometer diagnóstico exato da causa. Teclas físicas pressionadas podem interferir na digitação. Mais detalhes em [INPUT.md](INPUT.md).
+
 ## Clipboard e conflitos
 
 Sem histórico persistente. Servidor serializa leituras, notificações Windows e escritas, atribuindo ordem/revision autoritativa. Eventos deduplicados por eventId (cache limitado em RAM) e escritas remotas marcadas/suprimidas no listener. Mensagem automática com baseRevision diferente da atual recebe conflict e é descartada; nenhuma repetição automática. Duas cópias concorrentes com a mesma base: primeira aceita no servidor vence, segunda é rejeitada. Notificação Windows posterior é uma nova cópia local na ordem do servidor. Envios manuais são ações explícitas e podem substituir versão atual. Relógios não arbitram conflitos. Estado antigo e eventos pendentes são descartados na desconexão. Uma atualização recebida nunca gera nova atualização automática de retorno.
@@ -63,7 +84,10 @@ Android bloqueia texto com EXTRA_IS_SENSITIVE. Windows bloqueia ExcludeClipboard
 | Android | Desktop | Protocolo | Resultado |
 |---|---|---|---|
 | 0.1.x | 0.1.x | 1 | Compatível; ações dependem das capacidades reais |
-| 0.1.x | versão sem protocolo 1 | outro | Rejeitado com version_mismatch |
+| 0.1.x | 0.2.x | 1 sem extensão | Volume, mídia e clipboard compatíveis; mouse/teclado indisponíveis |
+| 0.2.x | 0.1.x | 1 sem extensão | Controles anteriores compatíveis; Android orienta atualizar PC para mouse/teclado |
+| 0.2.x | 0.2.x | 1 + input.v1 | Mouse/teclado após consentimento nos dois aplicativos |
+| 0.1.x / 0.2.x | versão sem protocolo 1 | outro | Rejeitado com version_mismatch |
 
 ## Ciclo de vida e extensão
 

@@ -7,6 +7,8 @@ pub struct Settings {
     pub download: bool,
     pub paused: bool,
     pub autostart: bool,
+    #[serde(rename = "allowInput", default)]
+    pub allow_input: bool,
 }
 
 fn path() -> Result<PathBuf, String> {
@@ -47,5 +49,22 @@ pub fn set_autostart(enabled: bool) -> Result<(), String> {
             Ok(()) => Ok(()),
             Err(_) => Ok(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Settings;
+
+    #[test]
+    fn legacy_preferences_never_grant_remote_input() {
+        let settings: Settings = serde_json::from_str(
+            r#"{"upload":true,"download":false,"paused":false,"autostart":false}"#,
+        )
+        .unwrap();
+        assert!(!settings.allow_input);
+        assert!(settings.upload);
+        let current = serde_json::to_value(&settings).unwrap();
+        assert_eq!(current["allowInput"], false);
     }
 }

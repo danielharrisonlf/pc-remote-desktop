@@ -10,7 +10,14 @@ use rustls::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{io::Cursor, sync::Arc, time::Duration};
+use std::{
+    io::Cursor,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tokio::{net::TcpListener, sync::Semaphore, time::timeout};
 use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::{
@@ -121,6 +128,8 @@ async fn handle(
     let mut config = WebSocketConfig::default();
     config.max_message_size = Some(protocol::MAX_FRAME);
     config.max_frame_size = Some(protocol::MAX_FRAME);
+    let input_feature = Arc::new(AtomicBool::new(false));
+    let handshake_feature = input_feature.clone();
     let mut ws = timeout(
         Duration::from_secs(8),
         accept_hdr_async_with_config(
@@ -129,6 +138,13 @@ async fn handle(
                 if req.uri().path() != "/v1/ws" || req.headers().contains_key("origin") {
                     return Err(tungstenite_forbidden());
                 }
+                handshake_feature.store(
+                    req.headers()
+                        .get("X-PC-Remote-Features")
+                        .and_then(|v| v.to_str().ok())
+                        == Some("input.v1"),
+                    Ordering::Release,
+                );
                 Ok(response)
             },
             Some(config),
@@ -181,7 +197,7 @@ async fn handle(
                 let msg=match parsed {Ok(m)=>m,Err(_)=>{error(&mut ws,Uuid::nil(),"invalid_message").await?;continue}};
                 let id=msg.id();
                 if msg.version()!=1{error(&mut ws,id,"version_mismatch").await?;continue;}
-                if id.is_nil()||seen.len()>=65_536{error(&mut ws,id,"invalid_message").await?;break;}
+                if id.is_nil()||seen.len()>=262_144{error(&mut ws,id,"invalid_message").await?;break;}
                 if !seen.insert(id){error(&mut ws,id,"invalid_message").await?;continue;}
                 match msg {
                     ClientMessage::PairRequest {device_id,device_name,code,..} if device.is_none()=>{
@@ -209,17 +225,21 @@ async fn handle(
                         }
                     }
                     ClientMessage::Hello {device_id,token,..} if device.is_none()=>{
-                        let epoch = match core.connect_authenticated(device_id,&token) { Ok(epoch) => epoch, Err(code) => {error(&mut ws,id,code).await?;break;} };
+                        let feature = input_feature.load(Ordering::Acquire);
+                        let epoch = match core.connect_authenticated(device_id,&token,feature) { Ok(epoch) => epoch, Err(code) => {error(&mut ws,id,code).await?;break;} };
                         events = core.events.subscribe();
                         first_valid_message=true;device=Some(device_id);cleanup.device=device;cleanup.epoch=epoch;let status=core.status();
-                        send(&mut ws,json!({"v":1,"type":"welcome","id":id,"pcId":status.pc_id,"pcName":status.pc_name,"capabilities":["audio","media","clipboard.text"]})).await?;
+                        let mut capabilities = vec!["audio", "media", "clipboard.text"];
+                        if feature { capabilities.push("input.control"); }
+                        send(&mut ws,json!({"v":1,"type":"welcome","id":id,"pcId":status.pc_id,"pcName":status.pc_name,"capabilities":capabilities})).await?;
                         send(&mut ws,serde_json::to_value(core.snapshot()).map_err(|e|e.to_string())?).await?;
                     }
                     ClientMessage::Request {action,..} if device.is_some()=>{
                         if !core.is_authorized_session(device.unwrap(),cleanup.epoch){error(&mut ws,id,"unauthorized").await?;break;}
                         if let Err(code)=protocol::validate_action(&action){error(&mut ws,id,code).await?;continue;}
+                        let send_snapshot = !action.is_input() || matches!(&action, Action::InputEnable { .. });
                         let result=dispatch(core.clone(),device.unwrap(),cleanup.epoch,action).await;
-                        match result {Ok(())=>{send(&mut ws,serde_json::to_value(core.snapshot()).map_err(|e|e.to_string())?).await?;send(&mut ws,protocol::ack(id)).await?},Err(code)=>error(&mut ws,id,&code).await?}
+                        match result {Ok(())=>{if send_snapshot {send(&mut ws,serde_json::to_value(core.snapshot()).map_err(|e|e.to_string())?).await?;}send(&mut ws,protocol::ack(id)).await?},Err(code)=>error(&mut ws,id,&code).await?}
                     }
                     _=>{error(&mut ws,id,"unauthorized").await?;break;}
                 }
@@ -254,10 +274,15 @@ mod integration_tests {
     use crate::secrets::Secrets;
     use rustls::{pki_types::ServerName, ClientConfig, RootCertStore};
     use tokio_rustls::TlsConnector;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     type TestSocket =
         tokio_tungstenite::WebSocketStream<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>;
 
     async fn connect(port: u16, cert: &str) -> TestSocket {
+        connect_features(port, cert, false).await
+    }
+
+    async fn connect_features(port: u16, cert: &str, input: bool) -> TestSocket {
         let mut roots = RootCertStore::empty();
         for cert in rustls_pemfile::certs(&mut Cursor::new(cert)) {
             roots.add(cert.unwrap()).unwrap();
@@ -272,7 +297,13 @@ mod integration_tests {
             .connect(ServerName::try_from("pc-remote.local").unwrap(), stream)
             .await
             .unwrap();
-        tokio_tungstenite::client_async("wss://pc-remote.local/v1/ws", tls)
+        let mut request = "wss://pc-remote.local/v1/ws".into_client_request().unwrap();
+        if input {
+            request
+                .headers_mut()
+                .insert("X-PC-Remote-Features", "input.v1".parse().unwrap());
+        }
+        tokio_tungstenite::client_async(request, tls)
             .await
             .unwrap()
             .0
@@ -373,9 +404,14 @@ mod integration_tests {
             json!({"v":1,"type":"hello","id":Uuid::new_v4(),"deviceId":device,"token":token}),
         )
         .await;
-        receive(&mut ws, "welcome").await;
+        let legacy_welcome = receive(&mut ws, "welcome").await;
+        assert_eq!(
+            legacy_welcome["capabilities"],
+            json!(["audio", "media", "clipboard.text"])
+        );
         let state = receive(&mut ws, "state").await;
         assert!(state.get("text").is_none());
+        assert!(state.get("input").is_none());
 
         let id = Uuid::new_v4();
         let request = json!({"v":1,"type":"request","id":id,"action":{"kind":"state.get"}});
@@ -384,6 +420,24 @@ mod integration_tests {
         assert_eq!(receive(&mut ws, "ack").await["id"], id.to_string());
         emit(&mut ws, request).await;
         assert_eq!(receive(&mut ws, "error").await["code"], "invalid_message");
+
+        let mut input_ws = connect_features(port, &certificate_pem, true).await;
+        emit(
+            &mut input_ws,
+            json!({"v":1,"type":"hello","id":Uuid::new_v4(),"deviceId":device,"token":token}),
+        )
+        .await;
+        let welcome = receive(&mut input_ws, "welcome").await;
+        assert!(welcome["capabilities"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("input.control")));
+        let state = receive(&mut input_ws, "state").await;
+        assert_eq!(state["input"], json!({"allowed":false,"enabled":false}));
+        emit(&mut input_ws, json!({"v":1,"type":"request","id":Uuid::new_v4(),"action":{"kind":"input.enable","enabled":true}})).await;
+        assert_eq!(receive(&mut input_ws, "error").await["code"], "unavailable");
+        emit(&mut input_ws, json!({"v":1,"type":"request","id":Uuid::new_v4(),"action":{"kind":"pointer.move","dx":2,"dy":3}})).await;
+        assert_eq!(receive(&mut input_ws, "error").await["code"], "unavailable");
 
         core.revoke(device).unwrap();
         assert!(!core.is_authorized_connection(device));
@@ -509,6 +563,20 @@ async fn dispatch(core: Arc<Core>, device: Uuid, epoch: u64, action: Action) -> 
         } => {
             core.set_client_sync(upload, download, paused);
             Ok(())
+        }
+        Action::InputEnable { enabled } => core.input_enable(device, epoch, enabled),
+        input @ (Action::PointerMove { .. }
+        | Action::PointerClick { .. }
+        | Action::PointerScroll { .. }
+        | Action::KeyboardText { .. }
+        | Action::KeyboardKey { .. }) => {
+            let checked = core.clone();
+            tokio::task::spawn_blocking(move || {
+                checked.check_resume();
+                checked.execute_input(device, epoch, &input)
+            })
+            .await
+            .map_err(|_| "internal")?
         }
     }
 }
