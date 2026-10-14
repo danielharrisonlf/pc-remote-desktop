@@ -1,0 +1,31 @@
+name: Windows checks and installer
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal
+      - run: cargo +stable-x86_64-pc-windows-msvc test --locked --manifest-path src-tauri/Cargo.toml
+      - run: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: pc-remote-desktop-windows-installer-unsigned
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,24 @@
+# Backend Windows 0.1.0
+
+O processo Tauri 2 executa o servidor local em Rust. A WebView React só chama comandos de configuração (`get_status`, `start_pairing`, `approve_pairing`, `revoke_device`, `update_settings`). Fechar a janela a oculta; o menu da bandeja encerra explicitamente o processo. O servidor e as integrações continuam ativos sem JavaScript. O serviço escuta TCP 43127 na sessão do usuário, sem privilégios administrativos ou abertura de porta no roteador. O firewall do Windows pode pedir autorização para redes privadas na primeira execução.
+
+## Segurança
+
+- TLS 1.2+ com certificado próprio gerado na primeira execução. Certificado e chave privada ficam em `%APPDATA%\PC Remote\identity.dpapi`, protegidos por Windows DPAPI da conta atual. O QR mostra o SHA-256 do DER inteiro. A descoberta mDNS (`_pcremote._tcp.local.`) fornece endereço, mas não estabelece confiança.
+- WebSocket aceito apenas em `/v1/ws`; upgrades com `Origin` são rejeitados. Um código aleatório de oito dígitos vence após 120 segundos. Novo código cancela pedidos antigos. Aprovação no PC emite token aleatório de 256 bits individual por dispositivo; o PC persiste somente o hash SHA-256 do token no arquivo DPAPI. Revogar remove o hash e fecha o socket. Apenas um controlador conectado por vez.
+- Tipos de mensagem, campos, UUIDs, tamanho e capacidades são validados antes do dispatch. Máximo de frame 512 KiB e texto 64 KiB UTF-8, sem NUL. Não há API para executar shell, abrir link ou injetar tecla.
+- As preferências não secretas ficam em `%APPDATA%\PC Remote\settings.json`. Inicialização automática grava a chave `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, sem admin. Diagnósticos não registram texto da área de transferência ou credenciais.
+
+## Ações nativas
+
+`audio.rs` usa Windows Core Audio (`IMMDeviceEnumerator` e `IAudioEndpointVolume`) e consulta o dispositivo de saída padrão em cada operação. Uma trava serializa alterações e evita disputa entre passos de volume. Leitura periódica detecta alteração externa e troca/desconexão do dispositivo padrão; o estado indisponível é publicado ao Android.
+
+`media.rs` mantém uma thread MTA para WinRT GSMTC. Identificadores opacos de sessão são UUIDs associados à identidade COM da sessão e são revogados quando a sessão desaparece. Antes de cada comando, a lista é atualizada e a capacidade correspondente é consultada. Busca de ±10 s só é mostrada quando `IsPlaybackPositionEnabled` e `MinSeekTime < MaxSeekTime`; o alvo é limitado a essa faixa e o retorno real de `TryChangePlaybackPositionAsync` determina sucesso. A posição considera o tempo decorrido desde `LastUpdatedTime`, enquanto a sessão toca. Players podem omitir título, capacidade ou sessão; o controle é limitado ao que GSMTC expõe. Nenhum fallback de teclado está habilitado no MVP para evitar atingir outro aplicativo.
+
+`clipboard.rs` cria uma janela de mensagens invisível, registra `AddClipboardFormatListener` e recebe `WM_CLIPBOARDUPDATE`. Leituras e escritas CF_UNICODETEXT são serializadas pelo estado Rust; abertura tenta novamente quando outro processo ocupa o clipboard. A janela é dona das escritas (`OpenClipboard(hwnd)`), exigência de `EmptyClipboard`/`SetClipboardData`. Formatos `ExcludeClipboardContentFromMonitorProcessing` e `CanUploadToCloudClipboard=0` impedem o envio automático ou manual marcado como sensível. Isso não identifica toda senha. O conteúdo nunca é logado nem persistido. Eventos recebem revisão monotônica e UUID; UUIDs recentes são deduplicados, cópias automáticas exigem a revisão base atual e a notificação da própria escrita é suprimida. O primeiro conteúdo existente não é enviado no início ou reconexão.
+
+## Limites e expansão
+
+O servidor anuncia `audio`, `media` e `clipboard.text`. A enum de ações em `protocol.rs` é o ponto de extensão para ações futuras; cada nova ação requer validação e versão/capacidade no protocolo antes de exposição ao Android. A descoberta mDNS pode ser bloqueada pela rede; o Android aceita endereço manual com fingerprint verificado. O Windows pode suspender sockets; o Android reconecta e busca estado novo, sem repetir comandos ou clipboard antigo. O processo não mantém histórico de clipboard.
+
+Para testes, `cargo test --lib` cobre contrato compartilhado, regras de autorização/pareamento, deduplicação e conflitos. Os testes nativos de volume e clipboard alteram temporariamente o estado real e restauram o texto/volume anterior; execute-os explicitamente com `cargo test --lib windows_audio_smoke -- --ignored` e `cargo test --lib windows_unicode_clipboard_smoke -- --ignored` em Windows com sessão interativa. O teste de clipboard exige que haja texto no clipboard para preservar e restaurar o conteúdo original.
