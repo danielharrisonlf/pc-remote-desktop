@@ -1,10 +1,10 @@
-# Versões verificadas em 14/10/2026
+# Versões verificadas em 15/10/2026
 
 Os lockfiles são a referência exata de todas as dependências transitivas. As versões abaixo foram usadas nas builds locais que acompanham esta entrega; não são versões beta.
 
 | Componente | Versão |
 |---|---|
-| Aplicativos / protocolo | 0.2.0 / 1 + extensão opcional input.v1 |
+| Desktop / Android RN / Android Kotlin / protocolo | 0.2.1 / 0.2.0 / 0.2.3-kotlin / 1 + extensão opcional input.v1 |
 | Node / npm | 24.21.0 / 11.19.0 |
 | Android React Native / React | 0.87.1 / 19.2.3 |
 | React Native Community CLI | 20.2.0 |

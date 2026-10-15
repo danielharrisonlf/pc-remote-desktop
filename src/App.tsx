@@ -119,7 +119,7 @@ function App() {
       <div className="sidebar-bottom">
         <div className="local-badge"><LockKeyhole size={15} /> Rede local · criptografado</div>
         <button className="theme-button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>Tema {theme === 'light' ? 'escuro' : 'claro'}</button>
-        <span className="version">DESKTOP 0.2.0 · PROTOCOLO 1</span>
+        <span className="version">DESKTOP 0.2.1 · PROTOCOLO 1</span>
       </div>
     </aside>
 

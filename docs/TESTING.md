@@ -2,6 +2,17 @@
 
 O código contém integrações nativas reais. Testes unitários não comprovam compatibilidade de cada player, permissões do Android nem continuidade durante suspensão. Este registro distingue execução automatizada, execução no Windows deste ambiente e validações pendentes em Android físico.
 
+## Atualização 0.2.1 — endereço LAN do convite, 15/10/2026
+
+- Reproduzido no Windows deste ambiente: a ordenação lexicográfica colocava o endereço de `vEthernet (Default Switch)` antes do IPv4 Wi-Fi que possui rota padrão. O QR usava esse primeiro endereço.
+- A enumeração agora promove `local_ip_address::local_ip()` somente quando esse endereço consta entre os IPv4 válidos enumerados. A implementação Windows da dependência usa `GetIpForwardTable` e `GetAdaptersAddresses`, sem enviar tráfego. Demais endereços, deduplicação e fallback determinístico são preservados.
+- **22 testes Rust passaram**, com os dois novos testes de múltiplas interfaces e fallback. Os três smokes antigos que alteram volume/clipboard/cursor não foram executados nessa rodada. O novo smoke de rede também é ignorado por padrão.
+- O smoke `default_route_qr_invitation_native_smoke` foi executado separadamente no Windows real e passou: o payload do convite gerado por um Core efêmero usou o endereço da interface com rota padrão. Não grava credenciais nem altera rede, clipboard, áudio ou cursor.
+- **2 testes Vitest passaram** e TypeScript passou. Revisão independente não encontrou bloqueio no código alterado.
+- `npm run tauri build -- --target x86_64-pc-windows-msvc` concluiu Vite, Rust release e NSIS. Instalador x64: 3.470.366 bytes, sem Authenticode. A tentativa inicial de teste pelo diretório pai escolheu o toolchain GNU e foi interrompida; a validação final utilizou MSVC no diretório do projeto com target explícito.
+
+Rede com múltiplas rotas padrão/VPN pode continuar exigindo endereço manual alcançável pelo celular. Não foi certificada descoberta em toda combinação de interfaces. Sem IPv4 válido, o fallback anterior de loopback no convite permanece; é necessário conectar o PC a uma rede antes de parear. O instalador atualizado não foi instalado por cima do processo do usuário durante a validação.
+
 ## Validação da versão 0.2.0 — touchpad e teclado
 
 | Verificação | Resultado |

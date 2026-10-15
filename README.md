@@ -1,20 +1,23 @@
 # PC Remote Desktop
 
-Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositório Windows independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.2.0, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md) e [validação](docs/TESTING.md).
+Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositório Windows independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.2.1, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md) e [validação](docs/TESTING.md).
 
-## Baixar e instalar — versão 0.2.0
+## Baixar e instalar — Windows 0.2.1
 
 | Aplicativo | Download |
 |---|---|
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.2.0/pc-remote-desktop-0.2.0-x64-setup.exe) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.2.1/pc-remote-desktop-0.2.1-x64-setup.exe) |
+| Android Kotlin — APK universal, branch native/kotlin | [Baixar APK Kotlin 0.2.3](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.3-kotlin/pc-remote-android-kotlin-0.2.3-evaluation.apk) |
 | Android ARM64 — celular compatível | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.0/pc-remote-android-0.2.0-arm64-evaluation.apk) |
 | Android x86_64 — emulador | [Baixar APK para emulador](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.0/pc-remote-android-0.2.0-x86_64-evaluation.apk) |
 
-Os downloads estão nas Releases privadas: entre no GitHub com uma conta que tenha acesso aos dois repositórios. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.2.0) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.2.0) também incluem os hashes SHA-256.
+Os downloads estão nas Releases privadas: entre no GitHub com uma conta que tenha acesso aos dois repositórios. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.2.1) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.2.3-kotlin) também incluem os hashes SHA-256.
 
 Instale o `.exe` no Windows e abra o PC Remote pela bandeja. No celular, abra o APK ARM64 pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte ambos à mesma rede local, inicie o pareamento no PC, escaneie o QR ou informe os dados exibidos e confirme o pedido no Windows. Os aplicativos instalados não precisam de Metro, Expo Go ou ferramentas de desenvolvimento.
 
 Esta é uma versão de avaliação: APK assinado com chave debug e instalador sem Authenticode. A validação em celular físico e players reais permanece pendente; consulte [testes e limitações](docs/TESTING.md).
+
+A versão 0.2.1 prioriza no QR o endereço IPv4 de uma interface com rota padrão, evitando escolher primeiro um adaptador virtual sem rota padrão. Mantém os demais endereços e o preenchimento manual. VPNs ou múltiplas rotas padrão ainda podem exigir informar o IPv4 alcançável pelo celular; a seleção não garante conectividade com todas as redes.
 
 ## Desenvolvimento e instalação
 

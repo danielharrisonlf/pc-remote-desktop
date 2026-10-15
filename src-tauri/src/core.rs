@@ -96,15 +96,39 @@ pub(crate) fn random_hex() -> String {
     hex::encode(b)
 }
 pub(crate) fn addresses() -> Vec<String> {
-    let mut a = local_ip_address::list_afinet_netifas()
+    let candidates = local_ip_address::list_afinet_netifas()
         .unwrap_or_default()
         .into_iter()
-        .filter(|(_, ip)| ip.is_ipv4() && !ip.is_loopback())
-        .map(|(_, ip)| ip.to_string())
-        .filter(|s| !s.starts_with("127.") && !s.starts_with("169.254."))
+        .map(|(_, ip)| ip)
+        .collect();
+    // On Windows local_ip() uses the IP Helper default-route table. Put that
+    // interface first so the QR code does not advertise a virtual adapter.
+    ordered_addresses(candidates, local_ip_address::local_ip().ok())
+}
+
+fn ordered_addresses(
+    candidates: Vec<std::net::IpAddr>,
+    preferred: Option<std::net::IpAddr>,
+) -> Vec<String> {
+    let mut a = candidates
+        .into_iter()
+        .filter_map(|ip| match ip {
+            std::net::IpAddr::V4(v4)
+                if !v4.is_loopback() && !v4.is_link_local() && !v4.is_unspecified() =>
+            {
+                Some(v4.to_string())
+            }
+            _ => None,
+        })
         .collect::<Vec<_>>();
     a.sort();
     a.dedup();
+    if let Some(preferred) = preferred.map(|ip| ip.to_string()) {
+        if let Some(position) = a.iter().position(|ip| ip == &preferred) {
+            a.remove(position);
+            a.insert(0, preferred);
+        }
+    }
     a
 }
 
@@ -584,6 +608,49 @@ fn clipboard_decision(
 mod tests {
     use super::*;
     use crate::secrets::Device;
+    use std::net::IpAddr;
+
+    fn ip(value: &str) -> IpAddr {
+        value.parse().unwrap()
+    }
+
+    #[test]
+    fn pairing_addresses_prefer_the_default_route_over_virtual_adapters() {
+        let candidates = vec![ip("172.29.192.1"), ip("192.168.0.102"), ip("10.8.0.2")];
+        assert_eq!(
+            ordered_addresses(candidates, Some(ip("192.168.0.102"))),
+            vec!["192.168.0.102", "10.8.0.2", "172.29.192.1"]
+        );
+    }
+
+    #[test]
+    fn pairing_addresses_fall_back_to_sorted_distinct_ipv4_addresses() {
+        let candidates = vec![
+            ip("172.29.192.1"),
+            ip("192.168.0.102"),
+            ip("172.29.192.1"),
+            ip("127.0.0.1"),
+            ip("169.254.1.2"),
+            ip("0.0.0.0"),
+            ip("fe80::1"),
+        ];
+        let expected = vec!["172.29.192.1", "192.168.0.102"];
+        assert_eq!(ordered_addresses(candidates.clone(), None), expected);
+        assert_eq!(
+            ordered_addresses(candidates, Some(ip("10.9.0.1"))),
+            expected
+        );
+    }
+
+    #[test]
+    #[ignore = "requires an active IPv4 default route on the host"]
+    fn default_route_qr_invitation_native_smoke() {
+        let preferred = local_ip_address::local_ip().expect("active IPv4 default route");
+        let invitation = test_core().start_pairing();
+        let payload: serde_json::Value = serde_json::from_str(&invitation.qr_payload).unwrap();
+        assert_eq!(payload["host"], preferred.to_string());
+    }
+
     fn test_core() -> Arc<Core> {
         Core::ephemeral(
             Secrets {
