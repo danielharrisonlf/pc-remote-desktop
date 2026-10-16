@@ -7,9 +7,7 @@ Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositór
 | Aplicativo | Download |
 |---|---|
 | Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.2.2/pc-remote-desktop-0.2.2-x64-setup.exe) |
-| Android Kotlin — APK universal, branch native/kotlin | [Baixar APK Kotlin 0.2.4](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.4-kotlin/pc-remote-android-kotlin-0.2.4-evaluation.apk) |
-| Android ARM64 — celular compatível | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.1/pc-remote-android-0.2.1-arm64-evaluation.apk) |
-| Android x86_64 — emulador | [Baixar APK para emulador](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.1/pc-remote-android-0.2.1-x86_64-evaluation.apk) |
+| Android — APK universal | [Baixar APK 0.2.4](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.4-kotlin/pc-remote-android-kotlin-0.2.4-evaluation.apk) |
 
 Os downloads estão nas Releases privadas: entre no GitHub com uma conta que tenha acesso aos dois repositórios. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.2.2) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.2.4-kotlin) também incluem os hashes SHA-256.
 
@@ -46,12 +44,12 @@ O instalador fica em `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/` (
 ## Parear e usar
 
 1. Conecte os dois aparelhos à mesma LAN. Abra o painel na bandeja e inicie o pareamento.
-2. No Android, escaneie o QR ou informe endereço do PC, porta 43127, código temporário e fingerprint completo mostrado pelo PC. Confira o endereço escolhido se houver VPN ou várias interfaces.
+2. No Android, digite o código de 8 dígitos e escolha o PC encontrado na rede, ou leia o QR. Com o código, o celular mostra uma faixa de cores que deve ser igual à exibida no PC.
 3. Confirme o pedido e o nome do celular no Windows. O código expira em 120 segundos.
 4. Volume e mídia ficam disponíveis conforme o estado e as capacidades reais. Para remover acesso, revogue o dispositivo no painel.
 5. Use **Enviar para o PC** / **Copiar do PC** no Android. Para sincronizar automaticamente, ative as direções desejadas **em ambos os aplicativos**. Elas começam desligadas.
 
-Se a rede bloquear descoberta, informe o IPv4 do PC manualmente. A descoberta não é prova de identidade. Não copie fingerprint de uma fonte desconhecida. Após reinstalar ou apagar a identidade do PC, remova o pareamento antigo e pareie novamente.
+Se a rede bloquear a descoberta (mDNS), use o QR. A descoberta não prova identidade: no pareamento por código, compare as cores antes de permitir. Após reinstalar ou apagar a identidade do PC, remova o pareamento antigo e pareie novamente.
 
 ## Firewall
 
@@ -73,18 +71,16 @@ Veja [testes e pendências](docs/TESTING.md) antes de considerar a build validad
 ## Touchpad e teclado remoto
 
 1. No Windows, abra **Transferência** (ou **Controles rápidos** na Visão geral) e ligue **Permitir mouse e teclado pelo celular**. A opção começa desligada.
-2. No Android, abra a aba **Touchpad** e toque em **Ativar touchpad** nesta conexão.
-3. Um dedo move o cursor e um toque clica. Dois dedos rolam a página e um toque com dois dedos é o clique direito. A faixa à direita do touchpad rola como uma barra de rolagem. Os botões de clique ficam na base da tela, junto das teclas Esc, Tab, Enter, Espaço, setas, Apagar e duplo clique. O botão de teclado abre um campo com prévia para revisar o texto antes de enviar.
+2. No Android, em **Mouse e teclado**, toque em **Ativar controle** nesta conexão.
+3. Deslize no touchpad para mover o cursor e toque para clicar. Os botões abaixo oferecem clique direito, duplo clique, rolagem e as teclas comuns. Digite no campo de texto e toque em **Digitar**.
 4. O alvo é o aplicativo em foco no Windows. Selecione a janela desejada antes de enviar texto. O controle não exibe a tela do PC.
-5. Para interromper, toque em **Desligar** no celular, use **Interromper agora** em Transferência ou na Visão geral do Windows, ou o menu da bandeja. Bloquear a permissão no PC também interrompe o controle.
+5. Para interromper, toque em **Desativar controle** no celular, use **Interromper** em Transferência ou na Visão geral do Windows, ou o menu da bandeja. Bloquear a permissão no PC também interrompe o controle.
 
 A ativação é descartada ao desconectar, suspender ou colocar o Android em segundo plano. É necessário ativar novamente; movimentos, cliques e textos pendentes não são repetidos. Texto digitado fica somente em RAM e não entra em logs/histórico. O limite por envio é **1.024 bytes UTF-8**, sem caracteres de controle; use os botões Enter e Tab para essas teclas. Aplicativos elevados, tela de bloqueio/UAC e algumas interfaces podem recusar entrada. Teclas físicas pressionadas no PC podem interferir. Veja [INPUT.md](docs/INPUT.md) para detalhes e validações.
 
 ## Atualizações
 
 O Windows consulta `releases/latest` de `pc-remote-desktop` ao abrir e no intervalo escolhido em **Configurações → Atualizações** (1 h, 6 h, 24 h ou manual; padrão 6 h). O resultado fica em cache para respeitar o limite de 60 consultas/h da API pública. Com versão nova, aparece **Versão X disponível** no cabeçalho; o diálogo mostra as notas e abre o instalador no navegador. Nada é instalado sem confirmação, e só URLs de releases deste projeto podem ser abertas pelo comando `open_url`.
-
-O Android consulta `pc-remote-android` ao abrir e a cada 6 horas em primeiro plano, ignora tags `-kotlin` e escolhe o APK da arquitetura do aparelho (ARM64 ou x86_64 no emulador). O banner **Ver novidades** abre as notas e o download do APK no navegador.
 
 Enquanto o repositório for privado, a API pública responde 404: a verificação automática fica silenciosa e a manual explica o motivo. Publique as releases (ou torne o repositório público) para o aviso funcionar.
 
