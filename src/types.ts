@@ -83,6 +83,24 @@ export interface DesktopStatus {
   incomingFile: IncomingFile | null;
 }
 
+/** Mirrors `update::UpdateInfo` in src-tauri/src/update.rs: a newer version from latest.json. */
+export interface UpdateInfo {
+  version: string;
+  currentVersion: string;
+  /** Markdown from the manifest `notes`; may be empty. */
+  notes: string;
+  /** Unix milliseconds. */
+  publishedAt: number | null;
+  /** The installer for this version is already downloaded and verified in Rust. */
+  ready: boolean;
+}
+
+/** Mirrors `update::DownloadEvent`, sent over a Channel during `update_download`. */
+export type DownloadEvent =
+  | { event: 'started'; data: { contentLength: number | null } }
+  | { event: 'progress'; data: { downloaded: number; contentLength: number | null } }
+  | { event: 'finished' };
+
 export const PROTOCOL_VERSION = 1;
 
 export function preferredAddress(addresses: string[]): string | undefined {

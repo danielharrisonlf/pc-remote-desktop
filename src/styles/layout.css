@@ -323,6 +323,16 @@ button.status-pill:hover {
   background: var(--accent-soft-hover);
 }
 
+.update-pill.is-ready {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.update-pill.is-ready:hover {
+  background: var(--accent-hover);
+}
+
 @keyframes pulse {
   0% {
     opacity: 0.6;

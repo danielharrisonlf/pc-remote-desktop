@@ -10,6 +10,8 @@ mod pairing;
 mod protocol;
 mod secrets;
 mod settings;
+/// Public for the integration tests in tests/updater.rs.
+pub mod update;
 
 use crate::core::{Core, Pairing, Status};
 use std::{sync::Arc, time::Duration};
@@ -64,6 +66,7 @@ fn open_received_folder(core: tauri::State<'_, Arc<Core>>) -> Result<(), String>
 }
 
 pub fn run() {
+    connection::install_crypto_provider();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app.get_webview_window("main") {
@@ -72,6 +75,9 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_notification::init())
+        // The webview gets no updater permission; the update_* commands drive it.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(update::UpdateState::default())
         .invoke_handler(tauri::generate_handler![
             get_status,
             start_pairing,
@@ -80,7 +86,10 @@ pub fn run() {
             update_settings,
             stop_input,
             open_url,
-            open_received_folder
+            open_received_folder,
+            update::update_check,
+            update::update_download,
+            update::update_install
         ])
         .setup(|app| {
             let identity =

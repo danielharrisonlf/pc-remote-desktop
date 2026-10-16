@@ -1,29 +1,35 @@
-import { Download, ExternalLink } from 'lucide-react';
-import { desktopApi } from '../api';
+import { Download, ExternalLink, RefreshCw, RotateCw } from 'lucide-react';
 import type { Updater } from '../hooks/useUpdater';
 import { useToast } from '../hooks/useToasts';
-import { formatBytes, formatLongDate } from '../lib/format';
+import { formatLongDate } from '../lib/format';
 import { errorMessage } from '../types';
 import { Button } from './Button';
 import { Dialog } from './Dialog';
-import { Markdown } from './Markdown';
+import { UpdateNotes, UpdateProgress } from './UpdatePanel';
 
-const openableLink = (href: string) => /^https:\/\/github\.com\/danielharrisonlf\/pc-remote-(desktop|android)\/releases(\/|$)/.test(href);
-
+/** Opened from the header notice: the found update, its progress and the next step. */
 export function UpdateDialog({ open, onClose, updater }: { open: boolean; onClose: () => void; updater: Updater }) {
   const toast = useToast();
-  const { release, installer, currentVersion, available } = updater;
-  if (!release) return null;
+  const { state, currentVersion } = updater;
+  const update = state.update;
+  if (!update) return null;
 
-  const published = formatLongDate(release.publishedAt);
-  const description = available
-    ? `${published ? `Publicada em ${published}. ` : ''}Você usa a versão ${currentVersion}.`
-    : 'Você já tem esta versão.';
+  const { phase } = state;
+  const busy = phase === 'downloading' || phase === 'verifying' || phase === 'installing';
+  const published = update.publishedAt ? formatLongDate(new Date(update.publishedAt).toISOString()) : null;
+  const title =
+    phase === 'error'
+      ? 'Não foi possível atualizar'
+      : phase === 'ready'
+        ? 'Atualização pronta'
+        : phase === 'installing'
+          ? `Instalando PC Remote ${update.version}`
+          : busy
+            ? `Baixando PC Remote ${update.version}`
+            : `PC Remote ${update.version} disponível`;
 
-  const attempt = (action: () => Promise<void>, success?: string) => {
-    action()
-      .then(() => success && toast.info(success))
-      .catch(reason => toast.error(errorMessage(reason)));
+  const attempt = (action: () => Promise<unknown>) => {
+    action().catch(reason => toast.error(errorMessage(reason)));
   };
 
   return (
@@ -31,41 +37,38 @@ export function UpdateDialog({ open, onClose, updater }: { open: boolean; onClos
       open={open}
       onClose={onClose}
       size="lg"
-      title={available ? `PC Remote ${release.version} disponível` : `Notas da versão ${release.version}`}
-      description={description}
+      title={title}
+      description={`Versão ${update.version}${published ? `, publicada em ${published}` : ''}. Você usa a ${currentVersion}.`}
       footer={
         <>
-          {available ? (
-            <Button
-              variant="ghost"
-              className="footer-start"
-              onClick={() => {
-                updater.skip(release.version);
-                onClose();
-              }}
-            >
-              Ignorar esta versão
-            </Button>
-          ) : null}
-          <Button icon={ExternalLink} onClick={() => attempt(updater.openReleasePage)}>
+          <Button variant="ghost" icon={ExternalLink} className="footer-start" onClick={() => attempt(updater.openReleasePage)}>
             Ver no GitHub
           </Button>
-          {available ? (
-            <Button
-              variant="primary"
-              icon={Download}
-              onClick={() => attempt(updater.download, 'Download iniciado no navegador.')}
-            >
-              {installer ? `Baixar instalador${installer.size ? ` (${formatBytes(installer.size)})` : ''}` : 'Abrir página de download'}
+          <Button onClick={onClose}>{phase === 'ready' ? 'Mais tarde' : 'Fechar'}</Button>
+          {phase === 'ready' ? (
+            <Button variant="primary" icon={RotateCw} onClick={() => attempt(updater.install)}>
+              Reiniciar para atualizar
             </Button>
-          ) : null}
+          ) : busy ? (
+            <Button variant="primary" loading>
+              {phase === 'installing' ? 'Instalando…' : phase === 'verifying' ? 'Verificando…' : 'Baixando…'}
+            </Button>
+          ) : phase === 'error' ? (
+            <Button variant="primary" icon={RefreshCw} onClick={() => attempt(updater.retry)}>
+              Tentar de novo
+            </Button>
+          ) : (
+            <Button variant="primary" icon={Download} onClick={() => attempt(updater.downloadAndInstall)}>
+              Baixar e instalar
+            </Button>
+          )}
         </>
       }
     >
-      <div className="release-notes">
-        <Markdown source={release.notes} canOpen={openableLink} onOpenLink={href => attempt(() => desktopApi.openUrl(href))} />
+      <div className="update-dialog-body">
+        <UpdateProgress updater={updater} />
+        <UpdateNotes updater={updater} />
       </div>
-      {available ? <p className="release-hint">O instalador não tem assinatura digital, então o Windows pode exibir um aviso.</p> : null}
     </Dialog>
   );
 }

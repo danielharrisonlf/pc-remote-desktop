@@ -1,12 +1,13 @@
-import { CircleArrowUp, Monitor, Moon, PanelLeft, Power, RefreshCw, Sun } from 'lucide-react';
+import { CircleArrowUp, Download, Monitor, Moon, PanelLeft, Power, RefreshCw, RotateCw, Sun } from 'lucide-react';
 import { Button } from '../components/Button';
 import { Segmented } from '../components/Segmented';
 import { SettingSwitch } from '../components/Switch';
+import { UpdateNotes, UpdateProgress } from '../components/UpdatePanel';
 import type { ThemePreference } from '../hooks/useTheme';
 import { useToast } from '../hooks/useToasts';
 import { UPDATE_INTERVALS, type UpdateInterval, type Updater } from '../hooks/useUpdater';
-import { formatRelative } from '../lib/format';
-import { isNewerVersion } from '../lib/semver';
+import { isBusy, updateStatus } from '../lib/updates';
+import { errorMessage } from '../types';
 import type { ViewProps } from './viewProps';
 
 interface SettingsViewProps extends ViewProps {
@@ -15,21 +16,9 @@ interface SettingsViewProps extends ViewProps {
   sidebarCollapsed: boolean;
   onSidebarCollapsedChange: (collapsed: boolean) => void;
   updater: Updater;
-  openUpdate: () => void;
 }
 
 const intervalLabels: Record<UpdateInterval, string> = { 0: 'Manual', 1: '1 h', 6: '6 h', 24: '24 h' };
-
-function updateStatus(updater: Updater, now: number): { text: string; tone: 'muted' | 'text-success' | 'text-accent' | 'text-warning' } {
-  if (updater.checking) return { text: 'Verificando…', tone: 'muted' };
-  const checked = updater.checkedAt ? ` Verificado ${formatRelative(updater.checkedAt, now)}.` : '';
-  const lookup = updater.lookup;
-  if (!lookup) return { text: 'Não verificado.', tone: 'muted' };
-  if (updater.available && updater.release) return { text: `A versão ${updater.release.version} está disponível.${checked}`, tone: 'text-accent' };
-  if (lookup.kind === 'unavailable') return { text: `${lookup.message}${checked}`, tone: 'text-warning' };
-  if (lookup.kind === 'none') return { text: `Nenhuma versão publicada.${checked}`, tone: 'muted' };
-  return { text: `Você está na versão mais recente.${checked}`, tone: 'text-success' };
-}
 
 export function SettingsView({
   settings,
@@ -40,20 +29,22 @@ export function SettingsView({
   sidebarCollapsed,
   onSidebarCollapsedChange,
   updater,
-  openUpdate,
 }: SettingsViewProps) {
   const toast = useToast();
-  const state = updateStatus(updater, now);
+  const { state } = updater;
+  const status = updateStatus(state, now);
+  const busy = isBusy(state);
 
-  // A manual check answers right away: open the notes when there is something
-  // new, otherwise confirm with a toast.
+  // The card already shows a found update; a manual check only confirms the other outcomes.
   const checkNow = () => {
-    void updater.check().then(lookup => {
-      if (!lookup) return;
-      if (lookup.kind === 'unavailable') toast.error(lookup.message);
-      else if (lookup.kind === 'found' && isNewerVersion(lookup.release.version, updater.currentVersion)) openUpdate();
-      else toast.success('Você já está na versão mais recente.');
+    void updater.check().then(outcome => {
+      if (outcome.kind === 'failed') toast.error(outcome.message);
+      else if (outcome.kind === 'current') toast.success('Você já está na versão mais recente.');
     });
+  };
+
+  const attempt = (action: () => Promise<unknown>) => {
+    action().catch(reason => toast.error(errorMessage(reason)));
   };
 
   return (
@@ -117,9 +108,31 @@ export function SettingsView({
           </div>
           <CircleArrowUp className="card-glyph" aria-hidden />
         </header>
-        <p className={`update-status ${state.tone}`} role="status">
-          {state.text}
+        <p className={`update-status ${status.tone}`} role="status">
+          {status.text}
         </p>
+        <UpdateProgress updater={updater} />
+        <div className="button-row">
+          {state.phase === 'ready' || state.phase === 'installing' ? (
+            <Button variant="primary" size="lg" icon={RotateCw} loading={state.phase === 'installing'} onClick={() => attempt(updater.install)}>
+              Reiniciar para atualizar
+            </Button>
+          ) : state.phase === 'available' ? (
+            <Button variant="primary" icon={Download} onClick={() => attempt(updater.downloadAndInstall)}>
+              Baixar e instalar
+            </Button>
+          ) : state.phase === 'error' ? (
+            <Button variant="primary" icon={RefreshCw} onClick={() => attempt(updater.retry)}>
+              Tentar de novo
+            </Button>
+          ) : null}
+          {state.phase !== 'error' ? (
+            <Button icon={RefreshCw} loading={state.phase === 'checking'} disabled={busy} onClick={checkNow}>
+              Verificar agora
+            </Button>
+          ) : null}
+        </div>
+        <UpdateNotes updater={updater} />
         <div className="field-row">
           <p className="field-title">Verificar automaticamente</p>
           <Segmented<UpdateInterval>
@@ -129,15 +142,14 @@ export function SettingsView({
             options={UPDATE_INTERVALS.map(value => ({ value, label: intervalLabels[value] }))}
           />
         </div>
-        <div className="button-row">
-          <Button icon={RefreshCw} loading={updater.checking} onClick={checkNow}>
-            Verificar agora
-          </Button>
-          {updater.release ? (
-            <Button variant={updater.available ? 'primary' : 'ghost'} onClick={openUpdate}>
-              {updater.available ? 'Ver novidades' : 'Notas da versão'}
-            </Button>
-          ) : null}
+        <div className="setting-list">
+          <SettingSwitch
+            icon={Download}
+            label="Baixar atualizações automaticamente"
+            description="Baixa em segundo plano e confere a assinatura. A instalação só começa quando você reiniciar."
+            checked={updater.autoDownload}
+            onChange={updater.setAutoDownload}
+          />
         </div>
       </section>
     </div>
