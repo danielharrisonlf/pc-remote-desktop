@@ -4,9 +4,8 @@ import { CircleCheck, Clock, LoaderCircle, RefreshCw } from 'lucide-react';
 import { desktopApi } from '../api';
 import { useNow } from '../hooks/useNow';
 import { formatCountdown, groupCode } from '../lib/format';
-import { preferredAddress, type DesktopStatus } from '../types';
+import type { DesktopStatus } from '../types';
 import { Button } from './Button';
-import { CopyButton } from './CopyButton';
 import { Dialog } from './Dialog';
 import { PendingRequest } from './DeviceItems';
 import { FingerprintStrip } from './Fingerprint';
@@ -26,14 +25,8 @@ interface PairingDrawerProps {
 
 export function PairingDrawer({ open, onClose, status, run, isBusy }: PairingDrawerProps) {
   return (
-    <Dialog
-      kind="drawer"
-      open={open}
-      onClose={onClose}
-      title="Parear celular"
-      description="O código vale por dois minutos e só funciona na mesma rede local."
-    >
-      {status ? <PairingContent status={status} run={run} isBusy={isBusy} onDone={onClose} /> : <p className="muted">Aguardando o serviço local…</p>}
+    <Dialog kind="drawer" open={open} onClose={onClose} title="Parear celular" description="O celular precisa estar na mesma rede Wi-Fi.">
+      {status ? <PairingContent status={status} run={run} isBusy={isBusy} onDone={onClose} /> : <p className="muted">Carregando…</p>}
     </Dialog>
   );
 }
@@ -46,7 +39,6 @@ function PairingContent({ status, run, isBusy, onDone }: { status: DesktopStatus
   const [authorized, setAuthorized] = useState<string | null>(null);
   const autoStarted = useRef(false);
   const generating = isBusy('pair');
-  const address = preferredAddress(status.addresses);
 
   // Opening the drawer is the intent to pair: create a code right away unless a
   // valid one is still running (regenerating would invalidate a pending phone).
@@ -82,8 +74,7 @@ function PairingContent({ status, run, isBusy, onDone }: { status: DesktopStatus
         <span className="pair-success-icon" aria-hidden>
           <CircleCheck />
         </span>
-        <p className="pair-success-title">{authorized} foi autorizado</p>
-        <p className="muted">O celular já pode controlar este PC. Você pode revogar o acesso a qualquer momento em Dispositivos.</p>
+        <p className="pair-success-title">{authorized} pareado</p>
         <Button variant="primary" onClick={onDone}>
           Concluir
         </Button>
@@ -99,29 +90,20 @@ function PairingContent({ status, run, isBusy, onDone }: { status: DesktopStatus
       <ol className="steps">
         <li>
           <span>
-            No Android, abra o PC Remote, vá em <strong>Conexão</strong> e toque em <strong>Ler QR Code</strong>.
+            No celular, abra o PC Remote e toque em <strong>Parear</strong>.
           </span>
         </li>
         <li>
-          <span>Aponte a câmera para o código abaixo.</span>
+          <span>Digite o código ou leia o QR Code.</span>
         </li>
         <li>
-          <span>Confirme o pedido que vai aparecer aqui.</span>
+          <span>Permita o pedido aqui.</span>
         </li>
       </ol>
 
       <div className="qr-stage">
-        <div className={active ? 'qr-frame' : 'qr-frame is-expired'}>
-          {qr && active ? (
-            <img src={qr} alt="QR Code com o endereço, a identidade deste PC e o código temporário" />
-          ) : generating ? (
-            <LoaderCircle className="spin" aria-label="Gerando código" />
-          ) : (
-            <Clock aria-hidden />
-          )}
-        </div>
         <div className="pair-code-block">
-          <span className="field-label">Código de pareamento</span>
+          <span className="field-label">Código</span>
           <span className="pair-code tabular" aria-label={pairing ? `Código ${pairing.code.split('').join(' ')}` : undefined}>
             {pairing && active ? groupCode(pairing.code) : '•••• ••••'}
           </span>
@@ -133,8 +115,21 @@ function PairingContent({ status, run, isBusy, onDone }: { status: DesktopStatus
               <span className="tabular">Expira em {formatCountdown(remaining)}</span>
             </span>
           ) : (
-            <span className="countdown is-expired">{generating ? 'Gerando um novo código…' : 'Código expirado'}</span>
+            <span className="countdown is-expired">{generating ? 'Gerando código…' : 'Código expirado'}</span>
           )}
+        </div>
+        <div className={active ? 'qr-frame' : 'qr-frame is-expired'}>
+          {qr && active ? (
+            <img src={qr} alt="QR Code de pareamento" />
+          ) : generating ? (
+            <LoaderCircle className="spin" aria-label="Gerando código" />
+          ) : (
+            <Clock aria-hidden />
+          )}
+        </div>
+        <div className="pair-identity">
+          <FingerprintStrip value={status.fingerprint} />
+          <span className="muted">O celular mostra as mesmas cores.</span>
         </div>
       </div>
 
@@ -153,7 +148,7 @@ function PairingContent({ status, run, isBusy, onDone }: { status: DesktopStatus
       ) : active ? (
         <p className="waiting-line" role="status">
           <span className="waiting-dot" aria-hidden />
-          Aguardando o celular ler o código
+          Aguardando o celular
         </p>
       ) : null}
 
@@ -162,49 +157,12 @@ function PairingContent({ status, run, isBusy, onDone }: { status: DesktopStatus
           icon={RefreshCw}
           loading={generating}
           disabled={status.pending.length > 0}
-          title={status.pending.length > 0 ? 'Responda o pedido pendente antes de gerar outro código.' : undefined}
+          title={status.pending.length > 0 ? 'Responda o pedido antes de gerar outro código.' : undefined}
           onClick={() => void run('pair', desktopApi.startPairing)}
         >
-          {active ? 'Gerar novo código' : 'Gerar código'}
+          {active ? 'Novo código' : 'Gerar código'}
         </Button>
       </div>
-
-      <details className="manual">
-        <summary>Digitar os dados no celular</summary>
-        <dl className="manual-list">
-          <div>
-            <dt>Endereço</dt>
-            <dd>
-              <span className="mono">{address ?? 'Indisponível'}</span>
-              {address ? <CopyButton value={address} label="endereço" /> : null}
-            </dd>
-          </div>
-          <div>
-            <dt>Porta</dt>
-            <dd>
-              <span className="mono tabular">{status.port}</span>
-              <CopyButton value={String(status.port)} label="porta" />
-            </dd>
-          </div>
-          <div>
-            <dt>Código</dt>
-            <dd>
-              <span className="mono tabular">{pairing && active ? pairing.code : '—'}</span>
-              {pairing && active ? <CopyButton value={pairing.code} label="código" /> : null}
-            </dd>
-          </div>
-          <div className="manual-fingerprint">
-            <dt>Identidade SHA-256</dt>
-            <dd>
-              <code className="mono">{status.fingerprint}</code>
-              <span className="manual-fp-row">
-                <FingerprintStrip value={status.fingerprint} size="sm" />
-                <CopyButton value={status.fingerprint} label="identidade SHA-256" />
-              </span>
-            </dd>
-          </div>
-        </dl>
-      </details>
     </div>
   );
 }
