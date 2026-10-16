@@ -5,8 +5,8 @@ import { cx } from '../lib/cx';
 import { IconButton } from './Button';
 
 const serviceCopy: Record<ServiceState, string> = {
-  starting: 'Conectando ao serviço',
-  active: 'Ativo na rede local',
+  starting: 'Conectando',
+  active: 'Ativo',
   connected: 'Celular conectado',
   unavailable: 'Serviço indisponível',
 };

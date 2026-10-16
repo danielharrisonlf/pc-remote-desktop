@@ -8,7 +8,7 @@ import { Button } from './Button';
 export function deviceActivity(device: Device, now: number): string {
   if (device.connected) return 'Conectado agora';
   if (device.lastSeenAt) return `Última conexão ${formatDay(device.lastSeenAt, now)}`;
-  return 'Sem conexão desde que o PC Remote foi aberto';
+  return 'Sem conexão recente';
 }
 
 export function DeviceRow({ device, now, action }: { device: Device; now: number; action?: ReactNode }) {
@@ -43,9 +43,7 @@ export function PendingRequest({ request, now, deciding, onDecide }: PendingRequ
       </span>
       <div className="request-text">
         <p className="request-title">{request.deviceName}</p>
-        <p className="request-meta">
-          Pediu acesso {formatRelative(request.requestedAt, now)}. Permita apenas se for o celular que você está pareando agora.
-        </p>
+        <p className="request-meta">Pediu acesso {formatRelative(request.requestedAt, now)}</p>
       </div>
       <div className="request-actions">
         <Button variant="danger-ghost" icon={ShieldX} disabled={deciding} onClick={() => onDecide(false)}>

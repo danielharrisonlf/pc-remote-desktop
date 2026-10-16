@@ -73,5 +73,5 @@ export function preferredAddress(addresses: string[]): string | undefined {
 export function errorMessage(reason: unknown): string {
   if (typeof reason === 'string' && reason.trim()) return reason;
   if (reason instanceof Error && reason.message) return reason.message;
-  return 'Não foi possível concluir a ação. Confira o diagnóstico e tente novamente.';
+  return 'Não foi possível concluir. Tente novamente.';
 }

@@ -15,5 +15,5 @@ export async function copyText(value: string): Promise<void> {
   field.select();
   const copied = document.execCommand('copy');
   field.remove();
-  if (!copied) throw new Error('Selecione e copie o texto manualmente.');
+  if (!copied) throw new Error('Não foi possível copiar.');
 }

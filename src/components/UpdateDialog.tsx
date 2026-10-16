@@ -18,7 +18,7 @@ export function UpdateDialog({ open, onClose, updater }: { open: boolean; onClos
   const published = formatLongDate(release.publishedAt);
   const description = available
     ? `${published ? `Publicada em ${published}. ` : ''}Você usa a versão ${currentVersion}.`
-    : `Você já usa a versão mais recente (${currentVersion}).`;
+    : 'Você já tem esta versão.';
 
   const attempt = (action: () => Promise<void>, success?: string) => {
     action()
@@ -54,7 +54,7 @@ export function UpdateDialog({ open, onClose, updater }: { open: boolean; onClos
             <Button
               variant="primary"
               icon={Download}
-              onClick={() => attempt(updater.download, 'Download aberto no navegador. Execute o instalador para atualizar; suas configurações e pareamentos são mantidos.')}
+              onClick={() => attempt(updater.download, 'Download iniciado no navegador.')}
             >
               {installer ? `Baixar instalador${installer.size ? ` (${formatBytes(installer.size)})` : ''}` : 'Abrir página de download'}
             </Button>
@@ -65,11 +65,7 @@ export function UpdateDialog({ open, onClose, updater }: { open: boolean; onClos
       <div className="release-notes">
         <Markdown source={release.notes} canOpen={openableLink} onOpenLink={href => attempt(() => desktopApi.openUrl(href))} />
       </div>
-      {available ? (
-        <p className="release-hint">
-          O instalador não é assinado digitalmente. Confira o hash SHA-256 publicado na release antes de executar.
-        </p>
-      ) : null}
+      {available ? <p className="release-hint">O instalador não tem assinatura digital, então o Windows pode exibir um aviso.</p> : null}
     </Dialog>
   );
 }

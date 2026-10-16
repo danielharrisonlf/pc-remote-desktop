@@ -18,10 +18,10 @@ export function OverviewView({ status, settings, changeSettings, run, isBusy, se
   const connectedDevice = status.devices.find(device => device.connected);
   const subtitle =
     serviceState === 'unavailable'
-      ? 'O serviço local não respondeu. Os dados abaixo podem estar desatualizados.'
+      ? 'O serviço não está respondendo.'
       : connectedDevice
-        ? `Controlado por ${connectedDevice.name} neste momento.`
-        : 'Pronto para receber celulares pareados nesta rede.';
+        ? `Conectado a ${connectedDevice.name}`
+        : 'Aguardando conexão';
   const devices = [...status.devices].sort((a, b) => Number(b.connected) - Number(a.connected) || (b.lastSeenAt ?? 0) - (a.lastSeenAt ?? 0));
 
   return (
@@ -43,7 +43,7 @@ export function OverviewView({ status, settings, changeSettings, run, isBusy, se
         </div>
         <dl className="hero-facts">
           <div className="fact">
-            <dt>Endereço na rede local</dt>
+            <dt>Endereço</dt>
             <dd>
               {endpoint ? (
                 <>
@@ -51,20 +51,20 @@ export function OverviewView({ status, settings, changeSettings, run, isBusy, se
                   <CopyButton value={endpoint} label="endereço e porta" />
                 </>
               ) : (
-                <span className="fact-value muted">Sem rede local</span>
+                <span className="fact-value muted">Sem rede</span>
               )}
             </dd>
           </div>
           <div className="fact">
-            <dt>Identidade do PC</dt>
+            <dt>Identidade</dt>
             <dd>
               <FingerprintInline value={status.fingerprint} />
             </dd>
           </div>
           <div className="fact">
-            <dt>Sessão</dt>
+            <dt>Celular conectado</dt>
             <dd>
-              <span className="fact-value">{connectedDevice ? connectedDevice.name : 'Nenhum celular conectado'}</span>
+              <span className="fact-value">{connectedDevice ? connectedDevice.name : 'Nenhum'}</span>
             </dd>
           </div>
         </dl>
@@ -114,12 +114,10 @@ export function OverviewView({ status, settings, changeSettings, run, isBusy, se
               title="Nenhum celular pareado"
               action={
                 <Button variant="secondary" icon={QrCode} onClick={openPairing}>
-                  Parear o primeiro celular
+                  Parear celular
                 </Button>
               }
-            >
-              Pareie o celular para controlar mídia, volume, mouse e teclado deste PC.
-            </EmptyState>
+            />
           ) : null}
           {devices.length > DEVICE_PREVIEW ? (
             <p className="card-footnote">
@@ -156,13 +154,13 @@ export function OverviewView({ status, settings, changeSettings, run, isBusy, se
               icon={Hand}
               className="block-btn"
               loading={isBusy('stopInput')}
-              onClick={() => void run('stopInput', desktopApi.stopInput, 'Controle remoto interrompido. Ative de novo no celular quando precisar.')}
+              onClick={() => void run('stopInput', desktopApi.stopInput, 'Controle interrompido.')}
             >
-              Interromper controle agora
+              Interromper controle
             </Button>
           ) : null}
           <button type="button" className="card-link" onClick={() => navigate('transfer')}>
-            Direções, histórico e detalhes
+            Mais opções
             <ArrowRight aria-hidden />
           </button>
         </section>

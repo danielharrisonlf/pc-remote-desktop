@@ -22,12 +22,12 @@ const intervalLabels: Record<UpdateInterval, string> = { 0: 'Manual', 1: '1 h', 
 
 function updateStatus(updater: Updater, now: number): { text: string; tone: 'muted' | 'text-success' | 'text-accent' | 'text-warning' } {
   if (updater.checking) return { text: 'Verificando…', tone: 'muted' };
-  const checked = updater.checkedAt ? ` Última verificação ${formatRelative(updater.checkedAt, now)}.` : '';
+  const checked = updater.checkedAt ? ` Verificado ${formatRelative(updater.checkedAt, now)}.` : '';
   const lookup = updater.lookup;
-  if (!lookup) return { text: 'Ainda não verificado.', tone: 'muted' };
+  if (!lookup) return { text: 'Não verificado.', tone: 'muted' };
   if (updater.available && updater.release) return { text: `A versão ${updater.release.version} está disponível.${checked}`, tone: 'text-accent' };
   if (lookup.kind === 'unavailable') return { text: `${lookup.message}${checked}`, tone: 'text-warning' };
-  if (lookup.kind === 'none') return { text: `Nenhuma versão publicada ainda.${checked}`, tone: 'muted' };
+  if (lookup.kind === 'none') return { text: `Nenhuma versão publicada.${checked}`, tone: 'muted' };
   return { text: `Você está na versão mais recente.${checked}`, tone: 'text-success' };
 }
 
@@ -65,10 +65,7 @@ export function SettingsView({
           </h2>
         </header>
         <div className="field-row">
-          <div>
-            <p className="field-title">Tema</p>
-            <p className="muted">“Sistema” acompanha o modo claro ou escuro do Windows.</p>
-          </div>
+          <p className="field-title">Tema</p>
           <Segmented<ThemePreference>
             label="Tema"
             value={theme}
@@ -84,7 +81,7 @@ export function SettingsView({
           <SettingSwitch
             icon={PanelLeft}
             label="Barra lateral compacta"
-            description="Mostra só os ícones. Em janelas estreitas ela fica compacta automaticamente."
+            description="Mostra só os ícones."
             checked={sidebarCollapsed}
             onChange={onSidebarCollapsedChange}
           />
@@ -101,12 +98,11 @@ export function SettingsView({
           <SettingSwitch
             icon={Power}
             label="Iniciar com o Windows"
-            description="Deixa o serviço disponível na bandeja assim que você entra na sua conta."
             checked={settings.autostart}
-            onChange={autostart => changeSettings({ autostart }, autostart ? 'O PC Remote vai iniciar com o Windows.' : 'Inicialização automática desligada.')}
+            onChange={autostart => changeSettings({ autostart })}
           />
         </div>
-        <p className="card-footnote">Fechar esta janela mantém o serviço na bandeja. Para encerrar de vez, use Encerrar no menu do ícone da bandeja.</p>
+        <p className="card-footnote">Fechar a janela mantém o PC Remote na bandeja. Para sair, use Encerrar no ícone da bandeja.</p>
       </section>
 
       <section className="card" aria-labelledby="updates-title">
@@ -116,8 +112,7 @@ export function SettingsView({
               Atualizações
             </h2>
             <p className="card-description">
-              Versão instalada <span className="tabular">{updater.currentVersion}</span>. As novidades vêm das releases do GitHub; nada é
-              instalado sem você confirmar.
+              Versão <span className="tabular">{updater.currentVersion}</span>
             </p>
           </div>
           <CircleArrowUp className="card-glyph" aria-hidden />
@@ -126,10 +121,7 @@ export function SettingsView({
           {state.text}
         </p>
         <div className="field-row">
-          <div>
-            <p className="field-title">Verificar automaticamente</p>
-            <p className="muted">Ao abrir o aplicativo e depois no intervalo escolhido.</p>
-          </div>
+          <p className="field-title">Verificar automaticamente</p>
           <Segmented<UpdateInterval>
             label="Intervalo de verificação"
             value={updater.interval}
@@ -143,7 +135,7 @@ export function SettingsView({
           </Button>
           {updater.release ? (
             <Button variant={updater.available ? 'primary' : 'ghost'} onClick={openUpdate}>
-              {updater.available ? 'Ver novidades e baixar' : 'Notas da versão atual'}
+              {updater.available ? 'Ver novidades' : 'Notas da versão'}
             </Button>
           ) : null}
         </div>

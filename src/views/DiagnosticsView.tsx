@@ -48,7 +48,7 @@ export function DiagnosticsView({ status, serviceState, appVersion, refresh }: D
 
   const copyReport = () => {
     copyText(buildReport(status, appVersion, serviceLabel))
-      .then(() => toast.success('Relatório copiado. Cole na mensagem para o suporte.'))
+      .then(() => toast.success('Relatório copiado.'))
       .catch(reason => toast.error(errorMessage(reason)));
   };
 
@@ -60,10 +60,7 @@ export function DiagnosticsView({ status, serviceState, appVersion, refresh }: D
             <h2 id="identity-title" className="card-title">
               Identidade deste PC
             </h2>
-            <p className="card-description">
-              O celular confere esta impressão digital antes de cada conexão. Compare as cores e os primeiros blocos com a tela Conexão do
-              Android: se forem diferentes, não continue o pareamento.
-            </p>
+            <p className="card-description">Ao parear, as cores devem ser iguais às do celular.</p>
           </div>
           <ShieldCheck className="card-glyph" aria-hidden />
         </header>
@@ -99,7 +96,7 @@ export function DiagnosticsView({ status, serviceState, appVersion, refresh }: D
           </div>
           {status.addresses.length > 1 ? (
             <div>
-              <dt>Outras interfaces</dt>
+              <dt>Outros endereços</dt>
               <dd className="mono">{status.addresses.filter(item => item !== address).join(', ')}</dd>
             </div>
           ) : null}
@@ -121,12 +118,9 @@ export function DiagnosticsView({ status, serviceState, appVersion, refresh }: D
 
       <section className="card" aria-labelledby="events-title">
         <header className="card-header">
-          <div>
-            <h2 id="events-title" className="card-title">
-              Eventos recentes
-            </h2>
-            <p className="card-description">Os 20 últimos avisos do serviço, do mais novo para o mais antigo.</p>
-          </div>
+          <h2 id="events-title" className="card-title">
+            Eventos recentes
+          </h2>
           <Button icon={ClipboardCopy} onClick={copyReport}>
             Copiar relatório
           </Button>
@@ -143,13 +137,11 @@ export function DiagnosticsView({ status, serviceState, appVersion, refresh }: D
             ))}
           </ol>
         ) : (
-          <EmptyState icon={ShieldCheck} title="Nenhum aviso recente">
-            O serviço não registrou falhas desde que foi aberto.
-          </EmptyState>
+          <EmptyState icon={ShieldCheck} title="Nenhum evento" />
         )}
         <p className="card-footnote">
           <LockKeyhole aria-hidden />
-          Textos copiados, digitação remota e credenciais nunca entram no registro nem no relatório.
+          O relatório não inclui textos copiados nem credenciais.
         </p>
       </section>
     </div>

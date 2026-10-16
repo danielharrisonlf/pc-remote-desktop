@@ -5,7 +5,7 @@ import { SettingSwitch } from '../components/Switch';
 import { cx } from '../lib/cx';
 import { formatClock, plural } from '../lib/format';
 import type { Settings, TransferEntry } from '../types';
-import { clipboardSummary, inputSummary } from './summaries';
+import { clipboardSummary } from './summaries';
 import type { ViewProps } from './viewProps';
 
 function SyncFlow({ settings }: { settings: Settings }) {
@@ -87,22 +87,17 @@ export function TransferView({ status, settings, changeSettings, run, isBusy }: 
           <SettingSwitch
             icon={ArrowUpRight}
             label="Do PC para o celular"
-            description="Envia ao celular os textos copiados no Windows enquanto ele estiver conectado."
             checked={settings.upload}
             onChange={upload => changeSettings({ upload })}
           />
           <SettingSwitch
             icon={ArrowDownLeft}
             label="Do celular para o PC"
-            description="Coloca na área de transferência do Windows os textos enviados pelo celular."
             checked={settings.download}
             onChange={download => changeSettings({ download })}
           />
         </div>
-        <p className="card-footnote">
-          O celular também precisa liberar a mesma direção. Textos marcados pelo Windows como sensíveis, como senhas de gerenciadores, nunca
-          são enviados.
-        </p>
+        <p className="card-footnote">O celular precisa ativar o mesmo sentido. Senhas copiadas de gerenciadores não são enviadas.</p>
 
         <div className="subsection">
           <h3 className="subsection-title">
@@ -116,50 +111,45 @@ export function TransferView({ status, settings, changeSettings, run, isBusy }: 
               ))}
             </ul>
           ) : (
-            <p className="muted subsection-empty">Nenhuma transferência desde que o PC Remote foi aberto.</p>
+            <p className="muted subsection-empty">Nenhuma transferência ainda.</p>
           )}
-          <p className="card-footnote">Só o horário, a direção e o tamanho ficam na memória. O conteúdo copiado não é guardado.</p>
+          <p className="card-footnote">O texto copiado não é salvo.</p>
         </div>
       </section>
 
       <section className="card" aria-labelledby="input-title">
         <header className="card-header">
-          <div>
-            <h2 id="input-title" className="card-title">
-              Mouse e teclado
-            </h2>
-            <p className="card-description">{inputSummary(settings, status.inputActive)}</p>
-          </div>
+          <h2 id="input-title" className="card-title">
+            Mouse e teclado
+          </h2>
           <span className={cx('badge', inputBadge.tone)}>{inputBadge.text}</span>
         </header>
         <div className="setting-list">
           <SettingSwitch
             icon={MousePointer2}
             label="Permitir mouse e teclado pelo celular"
-            description="Desligado por padrão. Cada conexão ainda precisa ativar o touchpad no celular. Desligar aqui interrompe na hora."
             checked={settings.allowInput}
             onChange={allowInput => changeSettings({ allowInput })}
           />
         </div>
         <div className="kill-switch">
           <div>
-            <p className="kill-title">Interromper o controle remoto</p>
-            <p className="muted">Desconecta o celular e desarma o touchpad. Também disponível no ícone da bandeja.</p>
+            <p className="kill-title">Interromper controle</p>
+            <p className="muted">Também disponível no ícone da bandeja.</p>
           </div>
           <Button
             variant="danger"
             icon={Hand}
             disabled={!status.inputActive}
             loading={isBusy('stopInput')}
-            onClick={() => void run('stopInput', desktopApi.stopInput, 'Controle remoto interrompido. Ative de novo no celular quando precisar.')}
+            onClick={() => void run('stopInput', desktopApi.stopInput, 'Controle interrompido.')}
           >
-            Interromper agora
+            Interromper
           </Button>
         </div>
         <ul className="notes">
-          <li>Cliques e texto vão para a janela que está em foco no Windows.</li>
-          <li>Aplicativos abertos como administrador e a tela de bloqueio podem ignorar o controle.</li>
-          <li>O texto digitado no celular não é salvo nem aparece no diagnóstico.</li>
+          <li>Cliques e texto vão para a janela em foco.</li>
+          <li>Apps abertos como administrador e a tela de bloqueio podem não responder.</li>
         </ul>
       </section>
     </div>

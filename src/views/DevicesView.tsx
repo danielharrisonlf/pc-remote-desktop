@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { QrCode, ShieldCheck, Smartphone } from 'lucide-react';
+import { QrCode, Smartphone } from 'lucide-react';
 import { desktopApi } from '../api';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -26,7 +26,7 @@ export function DevicesView({ status, run, isBusy, now, openPairing }: ViewProps
   return (
     <div className="view">
       <div className="view-intro">
-        <p>Somente celulares aprovados aqui podem controlar este PC, e um de cada vez.</p>
+        <p>Um celular por vez pode controlar este PC.</p>
         <Button variant="primary" icon={QrCode} onClick={openPairing}>
           Parear celular
         </Button>
@@ -36,7 +36,7 @@ export function DevicesView({ status, run, isBusy, now, openPairing }: ViewProps
         <section className="card card-attention" aria-labelledby="pending-title">
           <header className="card-header">
             <h2 id="pending-title" className="card-title">
-              Aguardando sua confirmação
+              Pedidos de acesso
             </h2>
             <span className="badge badge-warning">{plural(status.pending.length, 'pedido', 'pedidos')}</span>
           </header>
@@ -63,7 +63,7 @@ export function DevicesView({ status, run, isBusy, now, openPairing }: ViewProps
       <section className="card" aria-labelledby="authorized-title">
         <header className="card-header">
           <h2 id="authorized-title" className="card-title">
-            Celulares autorizados
+            Celulares pareados
           </h2>
           {status.devices.length > 0 ? (
             <span className="card-meta tabular">
@@ -87,13 +87,8 @@ export function DevicesView({ status, run, isBusy, now, openPairing }: ViewProps
             ))}
           </ul>
         ) : (
-          <EmptyState icon={Smartphone} title="Nenhum celular autorizado">
-            Quando você aprovar um pedido de pareamento, o celular aparece aqui com o status da conexão.
-          </EmptyState>
+          <EmptyState icon={Smartphone} title="Nenhum celular pareado" />
         )}
-        <p className="card-footnote">
-          <ShieldCheck aria-hidden />O horário de última conexão fica só na memória e é zerado quando o PC Remote é encerrado.
-        </p>
       </section>
 
       <ConfirmDialog
@@ -105,8 +100,7 @@ export function DevicesView({ status, run, isBusy, now, openPairing }: ViewProps
         onClose={() => setRevoking(null)}
       >
         <p>
-          <strong>{revoking?.name}</strong> será desconectado agora e não poderá mais controlar este PC. Para usá-lo de novo, será
-          preciso parear outra vez.
+          <strong>{revoking?.name}</strong> será desconectado e precisará parear de novo.
         </p>
       </ConfirmDialog>
     </div>

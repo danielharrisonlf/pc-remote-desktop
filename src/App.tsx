@@ -52,8 +52,8 @@ function Shell() {
   const wasUnavailable = useRef(false);
   useEffect(() => {
     const unavailable = serviceState === 'unavailable';
-    if (unavailable && !wasUnavailable.current && status) toast.error('O serviço local parou de responder. Tentando reconectar…');
-    if (!unavailable && wasUnavailable.current) toast.success('Serviço local reconectado.');
+    if (unavailable && !wasUnavailable.current && status) toast.error('Serviço sem resposta. Tentando reconectar…');
+    if (!unavailable && wasUnavailable.current) toast.success('Serviço reconectado.');
     wasUnavailable.current = unavailable;
   }, [serviceState, status, toast]);
 
@@ -135,22 +135,21 @@ function Shell() {
             <div className="view view-center">
               <EmptyState
                 icon={ServerOff}
-                title="Não foi possível falar com o serviço local"
+                title="O serviço não respondeu"
                 action={
                   <Button variant="primary" icon={RefreshCw} onClick={() => void refresh()}>
                     Tentar novamente
                   </Button>
                 }
               >
-                {lastError ?? 'O processo do PC Remote não respondeu.'} Se o problema continuar, encerre pela bandeja e abra o aplicativo de
-                novo.
+                Se continuar, encerre pelo ícone da bandeja e abra o PC Remote de novo.
               </EmptyState>
             </div>
           ) : (
             <div className="view view-center" role="status">
               <p className="loading-line">
                 <LoaderCircle className="spin" aria-hidden />
-                Lendo o estado do serviço…
+                Carregando…
               </p>
             </div>
           )}

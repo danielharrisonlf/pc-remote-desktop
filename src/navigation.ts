@@ -14,7 +14,7 @@ export const pages: Record<Page, PageMeta> = {
   overview: { nav: 'Visão geral', title: 'Visão geral', icon: LayoutDashboard },
   devices: { nav: 'Dispositivos', title: 'Dispositivos', icon: Smartphone },
   transfer: { nav: 'Transferência', title: 'Transferência e controle', icon: ArrowLeftRight },
-  diagnostics: { nav: 'Diagnóstico', title: 'Diagnóstico e segurança', icon: Activity },
+  diagnostics: { nav: 'Diagnóstico', title: 'Diagnóstico', icon: Activity },
   settings: { nav: 'Configurações', title: 'Configurações', icon: Settings },
 };
 

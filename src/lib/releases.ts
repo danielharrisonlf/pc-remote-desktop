@@ -78,7 +78,7 @@ async function request(url: string, options: FetchReleaseOptions): Promise<{ res
         failure: {
           kind: 'unavailable',
           reason: 'rate-limited',
-          message: 'O GitHub limitou as consultas deste endereço. A verificação será repetida mais tarde.',
+          message: 'GitHub indisponível no momento. Tente mais tarde.',
           retryAt: rateLimitReset(response),
         },
       };
@@ -86,7 +86,7 @@ async function request(url: string, options: FetchReleaseOptions): Promise<{ res
     return { response };
   } catch (reason) {
     if (reason instanceof DOMException && reason.name === 'AbortError') throw reason;
-    return { failure: { kind: 'unavailable', reason: 'network', message: 'Sem acesso ao GitHub. Confira a conexão com a internet.' } };
+    return { failure: { kind: 'unavailable', reason: 'network', message: 'Sem conexão com o GitHub.' } };
   }
 }
 
@@ -103,7 +103,7 @@ export async function fetchLatestRelease(repo: string, options: FetchReleaseOpti
     return {
       kind: 'unavailable',
       reason: 'not-found',
-      message: 'Nenhuma versão pública foi encontrada. O repositório pode ser privado ou ainda não ter releases.',
+      message: 'Nenhuma versão publicada encontrada.',
     };
   }
   if (!response.ok) {
