@@ -1,10 +1,12 @@
 pub use crate::pairing::{Pairing, Pending, PendingView};
 use crate::{
     audio, clipboard,
-    files::{IncomingFile, ReceivedFile, Slot},
+    files::{FileEntry, IncomingFile, Slot},
     media,
+    outbox::{Outbox, OutgoingFile, OutgoingResult},
     protocol::{
-        self, Action, AudioState, FilesState, InputState, MediaState, StateSnapshot, SyncSettings,
+        self, Action, AudioState, Features, FilesState, InputState, MediaState, StateSnapshot,
+        SyncSettings,
     },
     secrets::{self, Secrets},
     settings::{self, Settings},
@@ -76,11 +78,22 @@ pub struct Status {
     pub transfers: Vec<TransferEntry>,
     #[serde(rename = "inputActive")]
     pub input_active: bool,
-    /// Newest first; names and sizes only.
-    #[serde(rename = "receivedFiles")]
-    pub received_files: Vec<ReceivedFile>,
+    /// Files in both directions, newest first; names and sizes only.
+    #[serde(rename = "fileHistory")]
+    pub file_history: Vec<FileEntry>,
     #[serde(rename = "incomingFile")]
     pub incoming_file: Option<IncomingFile>,
+    /// The file being offered to or sent to the phone.
+    pub outgoing: Option<OutgoingFile>,
+    /// Names waiting to be sent, in order.
+    #[serde(rename = "outgoingQueue")]
+    pub outgoing_queue: Vec<String>,
+    /// Outcome of the last file sent to the phone.
+    #[serde(rename = "outgoingResult")]
+    pub outgoing_result: Option<OutgoingResult>,
+    /// The connected phone negotiated files.v2 and accepts files from the PC.
+    #[serde(rename = "phoneReceivesFiles")]
+    pub phone_receives_files: bool,
 }
 #[derive(Clone)]
 pub enum Outgoing {
@@ -114,8 +127,11 @@ pub struct Runtime {
     pub input_enabled: bool,
     pub input_events: VecDeque<Instant>,
     pub files_feature: bool,
+    pub files_v2: bool,
     pub file_slot: Option<Slot>,
-    pub received_files: VecDeque<ReceivedFile>,
+    pub outbox: Outbox,
+    pub file_history: VecDeque<FileEntry>,
+    pub search_events: VecDeque<Instant>,
     pub diagnostics: VecDeque<DiagnosticEntry>,
     pub transfers: VecDeque<TransferEntry>,
     pub last_seen: HashMap<Uuid, u64>,
@@ -257,8 +273,11 @@ impl Core {
                 input_enabled: false,
                 input_events: VecDeque::new(),
                 files_feature: false,
+                files_v2: false,
                 file_slot: None,
-                received_files: VecDeque::new(),
+                outbox: Outbox::default(),
+                file_history: VecDeque::new(),
+                search_events: VecDeque::new(),
                 diagnostics: VecDeque::new(),
                 transfers: VecDeque::new(),
                 last_seen: HashMap::new(),
@@ -314,16 +333,19 @@ impl Core {
             diagnostics: s.diagnostics.iter().cloned().collect(),
             transfers: s.transfers.iter().rev().cloned().collect(),
             input_active: s.input_enabled,
-            received_files: s.received_files.iter().rev().cloned().collect(),
+            file_history: s.file_history.iter().rev().cloned().collect(),
             incoming_file: s.incoming_file(),
+            outgoing: s.outbox.active(),
+            outgoing_queue: s.outbox.queued(),
+            outgoing_result: s.outbox.last(),
+            phone_receives_files: s.connected.is_some() && s.files_v2,
         }
     }
     pub fn connect_authenticated(
         &self,
         id: Uuid,
         token: &str,
-        input_feature: bool,
-        files_feature: bool,
+        features: Features,
     ) -> Result<u64, &'static str> {
         if id.is_nil() || token.len() != 64 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err("unauthorized");
@@ -350,11 +372,13 @@ impl Core {
         s.mark_seen(id);
         s.connection_epoch = s.connection_epoch.wrapping_add(1);
         s.client_sync = SyncSettings::default();
-        s.input_feature = input_feature;
+        s.input_feature = features.input;
         s.input_enabled = false;
         s.input_events.clear();
         s.abort_file();
-        s.files_feature = files_feature;
+        s.abort_outgoing("A conexão com o celular foi reiniciada.");
+        s.files_feature = features.files;
+        s.files_v2 = features.files_v2;
         Ok(s.connection_epoch)
     }
     pub fn is_authorized_session(&self, id: Uuid, epoch: u64) -> bool {
@@ -429,6 +453,9 @@ impl Core {
         save: impl FnOnce(&Settings) -> Result<(), String>,
     ) -> Result<(), String> {
         let mut s = self.state.lock().unwrap();
+        // Only "Interromper" and "Liberar" move the block (see set_input_blocked_with_save).
+        let mut new = new;
+        new.input_blocked = s.settings.input_blocked;
         let autostart_changed = new.autostart != s.settings.autostart;
         if autostart_changed {
             set_autostart(new.autostart)?;
@@ -444,16 +471,41 @@ impl Core {
             return Err(error);
         }
         s.settings = new;
-        if !s.settings.allow_input {
-            s.input_enabled = false;
-            s.input_events.clear();
-        }
-        if !s.settings.allow_files {
-            s.abort_file();
-        }
         s.revision += 1;
         self.publish_state_locked(&s);
         Ok(())
+    }
+    /// "Liberar" in the panel ends a block set by "Interromper".
+    pub fn unblock_input(&self) -> Result<(), String> {
+        self.set_input_blocked_with_save(false, settings::save)
+    }
+    /// "Interromper" and "Liberar" are the only writers of `input_blocked`, read and
+    /// written under one lock, so a panel holding older settings cannot undo them.
+    pub(crate) fn set_input_blocked_with_save(
+        &self,
+        blocked: bool,
+        save: impl FnOnce(&Settings) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let mut s = self.state.lock().unwrap();
+        let mut next = s.settings.clone();
+        next.input_blocked = blocked;
+        let saved = save(&next);
+        if saved.is_err() && !blocked {
+            // Lifting a block that could not be saved would come back after a restart.
+            return saved.map_err(|error| format!("Não foi possível liberar: {error}"));
+        }
+        if blocked {
+            s.input_enabled = false;
+            s.input_events.clear();
+        }
+        s.settings = next;
+        s.revision += 1;
+        self.publish_state_locked(&s);
+        saved.map_err(|error| {
+            format!(
+                "Mouse e teclado bloqueados nesta execução, mas não foi possível salvar: {error}"
+            )
+        })
     }
     pub fn snapshot(&self) -> StateSnapshot {
         let s = self.state.lock().unwrap();
@@ -469,15 +521,21 @@ impl Core {
             clipboard_revision: s.clipboard_revision,
             sync: s.client_sync.clone(),
             input: s.input_feature.then_some(InputState {
-                allowed: s.settings.allow_input,
+                allowed: !s.settings.input_blocked,
                 enabled: s.input_enabled,
             }),
+            // Receiving needs no switch since 0.6; files.v2 sessions get the larger limit.
             files: s.files_feature.then_some(FilesState {
-                allowed: s.settings.allow_files,
-                max_bytes: protocol::MAX_FILE_BYTES,
+                allowed: true,
+                max_bytes: if s.files_v2 {
+                    protocol::MAX_FILE_BYTES_V2
+                } else {
+                    protocol::MAX_FILE_BYTES
+                },
             }),
         }
     }
+    #[cfg(test)]
     pub fn input_active(&self, id: Uuid, epoch: u64) -> bool {
         let s = self.state.lock().unwrap();
         s.connected == Some(id)
@@ -485,7 +543,7 @@ impl Core {
             && !s.revoked_devices.contains(&id)
             && s.input_feature
             && s.input_enabled
-            && s.settings.allow_input
+            && !s.settings.input_blocked
     }
     pub fn input_enable(&self, id: Uuid, epoch: u64, enabled: bool) -> Result<(), String> {
         let mut s = self.state.lock().unwrap();
@@ -496,7 +554,7 @@ impl Core {
         {
             return Err("unauthorized".into());
         }
-        if !s.input_feature || (enabled && !s.settings.allow_input) {
+        if !s.input_feature || (enabled && s.settings.input_blocked) {
             return Err("unavailable".into());
         }
         if s.input_enabled != enabled {
@@ -507,23 +565,18 @@ impl Core {
         }
         Ok(())
     }
-    pub fn stop_input(&self) {
-        let mut s = self.state.lock().unwrap();
-        if s.input_feature {
-            s.input_enabled = false;
-            s.input_events.clear();
-            // Invalidate already queued enable requests as well as input events.
-            // Credentials stay valid; reconnection starts a fresh disarmed epoch.
-            s.input_feature = false;
-            s.end_file_session();
-            s.client_sync = SyncSettings::default();
-            s.connection_epoch = s.connection_epoch.wrapping_add(1);
-            if let Some(device_id) = s.connected.take() {
-                s.mark_seen(device_id);
-                let _ = self.events.send(Outgoing::Close { device_id });
-            }
-            s.revision += 1;
-        }
+    /// "Interromper": disarms at once and blocks mouse and keyboard until "Liberar".
+    /// The block is saved, so neither a queued enable nor a reconnection undoes it;
+    /// the connection itself stays for media, clipboard and files.
+    pub fn stop_input(&self) -> Result<(), String> {
+        self.stop_input_with_save(settings::save)
+    }
+    pub(crate) fn stop_input_with_save(
+        &self,
+        save: impl FnOnce(&Settings) -> Result<(), String>,
+    ) -> Result<(), String> {
+        // Blocked in RAM even if the disk write fails, so this run stays safe.
+        self.set_input_blocked_with_save(true, save)
     }
     pub fn execute_input(&self, id: Uuid, epoch: u64, action: &Action) -> Result<(), String> {
         let mut s = self.state.lock().unwrap();
@@ -534,7 +587,7 @@ impl Core {
         {
             return Err("unauthorized".into());
         }
-        if !s.input_feature || !s.input_enabled || !s.settings.allow_input {
+        if !s.input_feature || !s.input_enabled || s.settings.input_blocked {
             return Err("unavailable".into());
         }
         let now = Instant::now();
@@ -559,6 +612,8 @@ impl Core {
             });
         }
     }
+    /// Poll tick. A moving playback position alone publishes nothing: no screen shows it,
+    /// and a snapshot every tick while something plays would only cost battery.
     pub fn refresh(&self) {
         let expected_revision = self.state.lock().unwrap().revision;
         let audio = audio::read();
@@ -567,14 +622,43 @@ impl Core {
         if s.revision != expected_revision {
             return;
         }
-        let before = serde_json::to_string(&(&s.audio, &s.media)).unwrap_or_default();
-        let after = serde_json::to_string(&(&audio, &media)).unwrap_or_default();
+        let before = serde_json::to_string(&(&s.audio, media_key(&s.media))).unwrap_or_default();
+        let after = serde_json::to_string(&(&audio, media_key(&media))).unwrap_or_default();
         if before != after {
             s.audio = audio;
             s.media = media;
             s.revision += 1;
             self.publish_state_locked(&s);
         }
+    }
+    /// Re-reads the sessions after a command; players apply it asynchronously.
+    pub fn media_followup(&self) {
+        let media = media::read();
+        let mut s = self.state.lock().unwrap();
+        if serde_json::to_string(&media_key(&s.media)).ok()
+            != serde_json::to_string(&media_key(&media)).ok()
+        {
+            s.media = media;
+            s.revision += 1;
+            self.publish_state_locked(&s);
+        }
+    }
+    /// search.v1 limit: at most 5 searches in 10 s.
+    pub fn search_allowed(&self) -> bool {
+        let mut s = self.state.lock().unwrap();
+        let now = Instant::now();
+        while s
+            .search_events
+            .front()
+            .is_some_and(|at| now.duration_since(*at).as_secs() >= 10)
+        {
+            s.search_events.pop_front();
+        }
+        if s.search_events.len() >= 5 {
+            return false;
+        }
+        s.search_events.push_back(now);
+        true
     }
     pub fn set_client_sync(&self, upload: bool, download: bool, paused: bool) {
         let mut s = self.state.lock().unwrap();
@@ -594,8 +678,7 @@ impl Core {
         if clipboard::sequence() != sequence {
             return;
         }
-        let permitted = s.settings.upload
-            && !s.settings.paused
+        let permitted = s.settings.realtime
             && s.client_sync.download
             && !s.client_sync.paused
             && s.connected
@@ -660,10 +743,7 @@ impl Core {
         base_revision: u64,
     ) -> Result<(), String> {
         let mut s = self.state.lock().unwrap();
-        let consent = s.settings.download
-            && !s.settings.paused
-            && s.client_sync.upload
-            && !s.client_sync.paused;
+        let consent = s.settings.realtime && s.client_sync.upload && !s.client_sync.paused;
         let duplicate = clipboard_decision(
             &s.event_set,
             event_id,
@@ -739,6 +819,20 @@ impl Core {
                 "PC retomado após pausa de execução. Conexão reiniciada sem repetir ações.",
             );
         }
+    }
+}
+
+/// Sessions without the playback position, for change detection.
+fn media_key(media: &MediaState) -> MediaState {
+    MediaState {
+        sessions: media
+            .sessions
+            .iter()
+            .map(|session| protocol::MediaSession {
+                position_seconds: None,
+                ..session.clone()
+            })
+            .collect(),
     }
 }
 
@@ -851,10 +945,10 @@ mod tests {
             token_hash: secrets::token_hash(&token),
         });
         let old = core
-            .connect_authenticated(id, &token, false, false)
+            .connect_authenticated(id, &token, Features::legacy(false, false))
             .unwrap();
         let new = core
-            .connect_authenticated(id, &token, false, false)
+            .connect_authenticated(id, &token, Features::legacy(false, false))
             .unwrap();
         core.disconnect(id, old);
         assert!(core.is_authorized_session(id, new));
@@ -872,7 +966,7 @@ mod tests {
         });
         assert_eq!(core.status().devices[0].last_seen_at, None);
         let epoch = core
-            .connect_authenticated(id, &token, false, false)
+            .connect_authenticated(id, &token, Features::legacy(false, false))
             .unwrap();
         let connected_at = core.status().devices[0].last_seen_at.unwrap();
         core.disconnect(id, epoch);
@@ -924,14 +1018,16 @@ mod tests {
             token_hash: secrets::token_hash(&token),
         });
         let epoch = core
-            .connect_authenticated(id, &token, false, false)
+            .connect_authenticated(id, &token, Features::legacy(false, false))
             .unwrap();
         let now = unsafe { windows::Win32::System::SystemInformation::GetTickCount64() };
         core.last_live_tick
             .store(now.saturating_sub(6_000), Ordering::Release);
         core.check_resume();
         assert!(!core.is_authorized_session(id, epoch));
-        assert!(core.connect_authenticated(id, &token, false, false).is_ok());
+        assert!(core
+            .connect_authenticated(id, &token, Features::legacy(false, false))
+            .is_ok());
     }
     #[test]
     fn pairing_approval_and_revocation() {
@@ -948,15 +1044,15 @@ mod tests {
             .pair_complete(device, "Android".into(), generation)
             .unwrap();
         assert!(core
-            .connect_authenticated(device, &token, false, false)
+            .connect_authenticated(device, &token, Features::legacy(false, false))
             .is_ok());
         assert!(core
-            .connect_authenticated(device, &token, false, false)
+            .connect_authenticated(device, &token, Features::legacy(false, false))
             .is_ok());
         core.revoke(device).unwrap();
         assert!(!core.is_authorized_connection(device));
         assert!(core
-            .connect_authenticated(device, &token, false, false)
+            .connect_authenticated(device, &token, Features::legacy(false, false))
             .is_err());
     }
     #[test]
@@ -969,10 +1065,11 @@ mod tests {
             name: "Revocation test".into(),
             token_hash: secrets::token_hash(&token),
         });
-        let epoch = core.connect_authenticated(id, &token, true, false).unwrap();
+        let epoch = core
+            .connect_authenticated(id, &token, Features::legacy(true, false))
+            .unwrap();
         {
             let mut s = core.state.lock().unwrap();
-            s.settings.allow_input = true;
             s.input_enabled = true;
             s.client_sync.upload = true;
             s.client_sync.download = true;
@@ -1001,11 +1098,13 @@ mod tests {
         }
         // Disk and RAM retain the old hash, but automatic reconnection is denied.
         assert_eq!(
-            core.connect_authenticated(id, &token, true, false),
+            core.connect_authenticated(id, &token, Features::legacy(true, false)),
             Err("unauthorized")
         );
         core.revoke_with_save(id, |_| Ok(())).unwrap();
-        assert!(core.connect_authenticated(id, &token, true, false).is_err());
+        assert!(core
+            .connect_authenticated(id, &token, Features::legacy(true, false))
+            .is_err());
     }
     #[test]
     fn settings_failure_restores_autostart_and_keeps_live_preferences() {
@@ -1014,7 +1113,7 @@ mod tests {
         let mut changes = Vec::new();
         let new = Settings {
             autostart: true,
-            allow_input: true,
+            input_blocked: true,
             ..Settings::default()
         };
         assert_eq!(
@@ -1056,14 +1155,14 @@ mod tests {
         assert!(!core.status().settings.autostart);
         core.update_settings_with_io(
             Settings {
-                upload: true,
+                realtime: false,
                 ..Settings::default()
             },
             |_| panic!("unchanged autostart must not touch registry"),
             |_| Ok(()),
         )
         .unwrap();
-        assert!(core.status().settings.upload);
+        assert!(!core.status().settings.realtime);
     }
     #[test]
     fn concurrent_settings_updates_serialize_persistence_and_live_publication() {
@@ -1078,7 +1177,7 @@ mod tests {
         let first = std::thread::spawn(move || {
             first_core.update_settings_with_io(
                 Settings {
-                    upload: true,
+                    realtime: false,
                     ..Settings::default()
                 },
                 |_| panic!("autostart is unchanged"),
@@ -1096,7 +1195,7 @@ mod tests {
         let second = std::thread::spawn(move || {
             second_core.update_settings_with_io(
                 Settings {
-                    download: true,
+                    realtime: true,
                     ..Settings::default()
                 },
                 |_| panic!("autostart is unchanged"),
@@ -1118,10 +1217,68 @@ mod tests {
             serde_json::to_value(&core.status().settings).unwrap(),
             serde_json::to_value(&*persisted.lock().unwrap()).unwrap(),
         );
-        assert!(core.status().settings.download);
+        // The second update replaced the whole object after the first was saved.
+        assert!(core.status().settings.realtime);
     }
     #[test]
-    fn input_needs_feature_pc_consent_and_fresh_session_activation() {
+    fn clipboard_sync_follows_the_single_realtime_switch_and_the_phone_directions() {
+        let core = test_core();
+        let id = Uuid::new_v4();
+        let token = random_hex();
+        core.state.lock().unwrap().secrets.devices.push(Device {
+            id,
+            name: "Sync test".into(),
+            token_hash: secrets::token_hash(&token),
+        });
+        core.connect_authenticated(id, &token, Features::legacy(true, true))
+            .unwrap();
+        // Automatic writes from the phone need the phone's upload direction too.
+        assert_eq!(
+            core.clipboard_set(Uuid::new_v4(), "x", true, 0),
+            Err("unavailable".into())
+        );
+        core.set_client_sync(true, true, false);
+        core.state.lock().unwrap().settings.realtime = false;
+        assert_eq!(
+            core.clipboard_set(Uuid::new_v4(), "x", true, 0),
+            Err("unavailable".into())
+        );
+        // The PC side of the gate is only `realtime`; manual sends never depend on it.
+        let s = core.state.lock().unwrap();
+        assert!(!s.settings.realtime && s.client_sync.upload && s.client_sync.download);
+    }
+    #[test]
+    fn files_are_allowed_without_a_switch_and_v2_sessions_get_one_gigabyte() {
+        let core = test_core();
+        let id = Uuid::new_v4();
+        let token = random_hex();
+        core.state.lock().unwrap().secrets.devices.push(Device {
+            id,
+            name: "Files limit".into(),
+            token_hash: secrets::token_hash(&token),
+        });
+        core.connect_authenticated(id, &token, Features::legacy(false, true))
+            .unwrap();
+        let files = core.snapshot().files.unwrap();
+        assert!(files.allowed);
+        assert_eq!(files.max_bytes, protocol::MAX_FILE_BYTES);
+        let features = Features {
+            files: true,
+            files_v2: true,
+            ..Features::default()
+        };
+        let epoch = core.connect_authenticated(id, &token, features).unwrap();
+        assert_eq!(
+            core.snapshot().files.unwrap().max_bytes,
+            protocol::MAX_FILE_BYTES_V2
+        );
+        assert!(core.files_v2(id, epoch));
+        assert!(core.status().phone_receives_files);
+        core.disconnect(id, epoch);
+        assert!(!core.status().phone_receives_files);
+    }
+    #[test]
+    fn input_is_ready_after_pairing_and_interromper_blocks_until_liberar() {
         let core = test_core();
         let id = Uuid::new_v4();
         let token = random_hex();
@@ -1131,33 +1288,69 @@ mod tests {
             token_hash: secrets::token_hash(&token),
         });
         let old = core
-            .connect_authenticated(id, &token, false, false)
+            .connect_authenticated(id, &token, Features::legacy(false, false))
             .unwrap();
         assert!(core.snapshot().input.is_none());
         assert_eq!(core.input_enable(id, old, true), Err("unavailable".into()));
-        let fresh = core.connect_authenticated(id, &token, true, false).unwrap();
-        assert!(core.snapshot().input.is_some());
+        let fresh = core
+            .connect_authenticated(id, &token, Features::legacy(true, false))
+            .unwrap();
+        // No PC switch any more: allowed from the first snapshot, still disarmed.
+        let input = core.snapshot().input.unwrap();
+        assert!(input.allowed && !input.enabled);
+        assert!(!core.input_active(id, fresh));
+        core.input_enable(id, fresh, true).unwrap();
+        assert!(core.input_active(id, fresh));
+        let mut saved = None;
+        core.stop_input_with_save(|settings| {
+            saved = Some(settings.clone());
+            Ok(())
+        })
+        .unwrap();
+        assert!(saved.unwrap().input_blocked);
+        assert!(!core.input_active(id, fresh));
+        // The session stays for media and files; only input is refused.
+        assert!(core.is_authorized_session(id, fresh));
+        assert!(!core.snapshot().input.unwrap().allowed);
+        assert_eq!(
+            core.execute_input(id, fresh, &Action::PointerMove { dx: 1, dy: 0 }),
+            Err("unavailable".into())
+        );
         assert_eq!(
             core.input_enable(id, fresh, true),
             Err("unavailable".into())
         );
-        core.state.lock().unwrap().settings.allow_input = true;
-        core.input_enable(id, fresh, true).unwrap();
-        assert!(core.input_active(id, fresh));
-        core.stop_input();
-        assert!(!core.input_active(id, fresh));
-        assert_eq!(
-            core.execute_input(id, fresh, &Action::PointerMove { dx: 1, dy: 0 }),
-            Err("unauthorized".into())
-        );
+        // A reconnection does not undo the block.
+        let fresh = core
+            .connect_authenticated(id, &token, Features::legacy(true, false))
+            .unwrap();
         assert_eq!(
             core.input_enable(id, fresh, true),
-            Err("unauthorized".into())
+            Err("unavailable".into())
         );
-        let fresh = core.connect_authenticated(id, &token, true, false).unwrap();
-        assert!(!core.input_active(id, fresh));
+        // A failed save still blocks this run.
+        let error = core
+            .stop_input_with_save(|_| Err("disk".into()))
+            .unwrap_err();
+        assert!(error.contains("bloqueados nesta execução"));
+        assert!(core.status().settings.input_blocked);
+        // Settings sent by a panel that still shows the block as lifted do not lift it.
+        let mut stale = core.status().settings;
+        stale.input_blocked = false;
+        stale.realtime = false;
+        core.update_settings_with_io(stale, |_| Ok(()), |_| Ok(()))
+            .unwrap();
+        assert!(core.status().settings.input_blocked && !core.status().settings.realtime);
+        // "Liberar" that cannot be saved keeps the block; a saved one lifts it.
+        assert!(core
+            .set_input_blocked_with_save(false, |_| Err("disk".into()))
+            .is_err());
+        assert!(core.status().settings.input_blocked);
+        core.set_input_blocked_with_save(false, |_| Ok(())).unwrap();
         core.input_enable(id, fresh, true).unwrap();
-        let replacement = core.connect_authenticated(id, &token, true, false).unwrap();
+        let replacement = core
+            .connect_authenticated(id, &token, Features::legacy(true, false))
+            .unwrap();
         assert!(!core.input_active(id, replacement));
         assert_eq!(
             core.input_enable(id, fresh, true),

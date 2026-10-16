@@ -1,4 +1,4 @@
-# PC Remote Protocol 1 — aplicativos 0.1.x / 0.2.x
+# PC Remote Protocol 1 — aplicativos 0.1.x a 0.6.x
 
 Contrato normativo, copiado integralmente nos dois repositórios. Transporte WSS/TLS 1.2+ na LAN, porta TCP 43127; descoberta mDNS `_pcremote._tcp.local.`. A descoberta informa endereço/nome, nunca estabelece confiança. UTF-8 JSON, limite de frame 512 KiB (inclui expansão de escape JSON de textos de 64 KiB), texto 64 KiB UTF-8, sem NUL. Versão incompatível é rejeitada. Cada mensagem tem `v:1`; IDs são UUIDs. Campos desconhecidos em comandos são rejeitados.
 
@@ -37,9 +37,9 @@ PC → cliente:
 | media.control | sessionId: string; command: play/pause/previous/next/seek; offsetSeconds: -10 ou 10 somente para seek | Consulta capacidade antes de executar |
 | clipboard.set | eventId: UUID; origin: android; text: string; automatic: boolean; baseRevision: inteiro >=0 | Atualiza clipboard, nunca cola ou executa |
 | clipboard.get | nenhum | Leitura explícita; evento com automatic:false |
-| sync.set | upload,download,paused: boolean | Preferências da conexão, inicialmente false,false,false |
+| sync.set | upload,download,paused: boolean | Preferências da conexão, inicialmente false,false,false. O Android 0.6 envia upload=download=«Sincronização em tempo real» e paused=false logo após o welcome e a cada mudança |
 
-Ack confirma execução, nunca apenas enfileiramento. Erros: `invalid_message`, `version_mismatch`, `unauthorized`, `pairing_expired`, `pairing_denied`, `rate_limited`, `unavailable`, `conflict`, `sensitive`, `too_large`, `clipboard_busy`, `internal` e, na extensão files.v1, `file_type`, `file_busy`, `file_integrity`, `storage`. Não ecoar conteúdo/credenciais em erros. IDs de request repetidos na conexão não executam novamente; cliente não reutiliza comandos após reconectar.
+Ack confirma execução, nunca apenas enfileiramento. Erros: `invalid_message`, `version_mismatch`, `unauthorized`, `pairing_expired`, `pairing_denied`, `rate_limited`, `unavailable`, `conflict`, `sensitive`, `too_large`, `clipboard_busy`, `internal` e, nas extensões files.v1/files.v2, `file_type`, `file_busy`, `file_integrity`, `storage`. Não ecoar conteúdo/credenciais em erros. IDs de request repetidos na conexão não executam novamente; cliente não reutiliza comandos após reconectar.
 
 ## Estado e capacidades
 
@@ -50,11 +50,15 @@ Ack confirma execução, nunca apenas enfileiramento. Erros: `invalid_message`, 
 
 Estado não inclui conteúdo do clipboard. Snapshot após hello/reconexão não transfere clipboard existente. Revision monotônica por execução do PC, não timestamp. Android aceita somente snapshots mais recentes na conexão; durante arraste mantém valor local, limita envio a 10 Hz, envia valor final e aguarda ack final antes de adotar estado remoto.
 
+Desde o desktop 0.6.0, `media.sessions` vem ordenada: primeiro a sessão que o Windows trata como atual (`GetCurrentSession`), depois as que estão tocando, depois as demais. `app` é um nome amigável quando o aplicativo é conhecido (Spotify, Google Chrome, Microsoft Edge, Firefox, Opera, Brave, VLC, Reprodutor Multimídia, Groove/Media Player); senão, o AppUserModelID. O Android 0.6 segue a primeira sessão enquanto o usuário não escolher outra. Mudar só `positionSeconds` não gera snapshot novo; depois de um `media.control` aceito o PC relê as sessões em 150, 500 e 1.200 ms e publica se algo mudou.
+
 ## Extensão negociada input.v1 — aplicativos 0.2.0
 
 O Android solicita a extensão no upgrade WebSocket com `X-PC-Remote-Features: input.v1`. O header não concede acesso; autorização permanece pelo token individual dentro do TLS validado. Hello não muda. Desktop antigo ignora o header. Desktop novo só inclui `input.control` no welcome e o campo opcional `input` nos snapshots de uma conexão que negociou a extensão. Clientes antigos recebem exatamente as capacidades e formato antigos.
 
 Snapshot negociado acrescenta `"input":{"allowed":false,"enabled":false}`. `allowed` indica a permissão local do Windows; `enabled` indica ativação nesta conexão. Ambos começam falsos. A permissão pode ser persistida pelo PC, mas a ativação nunca é persistida. Revogação, troca de conexão, suspensão, desconexão e bloqueio no PC limpam a ativação. A ação de emergência no PC invalida o epoch e encerra a conexão para impedir reativação por requests antigos; as credenciais continuam válidas. O Android desarma o PC e descarta a fila ao perder o foco da janela ou ir para segundo plano. Se o usuário não desligou o touchpad, o Android envia `input.enable` de novo ao voltar ao primeiro plano com foco, na mesma conexão autenticada; nova conexão, bloqueio ou desligamento no PC exigem ação explícita.
+
+**A partir dos aplicativos 0.6.0** (sem mudança no formato): no desktop, `allowed` significa "não bloqueado no PC" e começa verdadeiro; a chave "Permitir mouse e teclado" deixou de existir. **Interromper** (painel ou bandeja) desativa a sessão, publica `allowed:false` e grava o bloqueio, que só termina com **Liberar** no PC; por isso não precisa mais encerrar a conexão. No Android 0.6, a intenção de usar o touchpad começa ligada a cada conexão: o app envia `input.enable` sozinho quando está em primeiro plano com foco e o PC permite, inclusive quando `allowed` volta a ser verdadeiro. **Desligar** no celular vale até o usuário tocar em **Ativar touchpad**, enquanto o processo existir. Uma ativação recusada ou não confirmada não é repetida automaticamente.
 
 | kind | Campos | Limites / resultado |
 |---|---|---|
@@ -76,6 +80,8 @@ SendInput pode ser bloqueado por UIPI, aplicativos elevados ou tela protegida; q
 Sem histórico persistente. Servidor serializa leituras, notificações Windows e escritas, atribuindo ordem/revision autoritativa. Eventos deduplicados por eventId (cache limitado em RAM) e escritas remotas marcadas/suprimidas no listener. Mensagem automática com baseRevision diferente da atual recebe conflict e é descartada; nenhuma repetição automática. Duas cópias concorrentes com a mesma base: primeira aceita no servidor vence, segunda é rejeitada. Notificação Windows posterior é uma nova cópia local na ordem do servidor. Envios manuais são ações explícitas e podem substituir versão atual. Relógios não arbitram conflitos. Estado antigo e eventos pendentes são descartados na desconexão. Uma atualização recebida nunca gera nova atualização automática de retorno.
 
 Android acompanha alterações apenas em foco. Ao retomar estabelece baseline sem enviar texto preexistente. Windows acompanha WM_CLIPBOARDUPDATE, sem snapshot de conteúdo no início. Sincronização desativada por padrão em ambos; direção exige consentimento nos dois aplicativos. Aplicação automática no Android é preferência separada, somente em foco. Segundo plano não garante conexão; se houver recepção antes da suspensão, notificação genérica sem conteúdo abre app. Não há serviço permanente no MVP.
+
+**A partir dos aplicativos 0.6.0** cada app tem uma única opção, **Sincronização em tempo real**, ligada por padrão (o Windows grava `realtime` em `settings.json`; o Android, a preferência `realtime`). O PC envia `clipboard.event` automático só com a opção ligada no PC e `download` pedido pelo celular, e aceita `clipboard.set` automático só com a opção ligada no PC e `upload` pedido pelo celular. Ações manuais (`clipboard.set` com `automatic:false`, `clipboard.get`, arquivos) não dependem da opção. No Android 0.6 com a opção ligada: o texto que chega do PC vai direto para a área de transferência do celular, também com o app em segundo plano enquanto a conexão existir (o Android limita a leitura em segundo plano, não a escrita); com o app em foco, cada cópia é enviada ao PC; ao voltar para o app, um texto copiado enquanto ele estava fora é enviado uma vez, se for diferente do último texto visto ou trocado nesta execução do app (na primeira abertura só vira referência, sem envio). O texto aplicado a partir do PC vira a referência, então não volta ao PC. "Buscar do PC" (`clipboard.get`) copia direto no celular.
 
 Android bloqueia texto com EXTRA_IS_SENSITIVE. Windows bloqueia ExcludeClipboardContentFromMonitorProcessing e CanUploadToCloudClipboard=0. Isso não detecta todas as senhas. Unicode e quebras preservados; rejeitar NUL e texto acima do limite. O clipboard continua só texto; imagens e PDFs do celular para o PC usam a extensão files.v1.
 
@@ -121,6 +127,57 @@ Armazenamento no Windows: pasta Downloads (Known Folder; fallback `%USERPROFILE%
 
 Cliente Android: fontes são o seletor do sistema (`ACTION_OPEN_DOCUMENT` com png/jpeg/pdf e seleção múltipla) e Compartilhar (`ACTION_SEND`/`ACTION_SEND_MULTIPLE` com os três tipos), só com URIs `content://`. Nome por `OpenableColumns.DISPLAY_NAME`, tamanho por `OpenableColumns.SIZE` ou `openAssetFileDescriptor().length` (tamanho desconhecido é recusado), MIME por `ContentResolver.getType` ou pela extensão; os primeiros bytes conferem a assinatura antes de entrar na fila, e o nome passa pela mesma limpeza do PC, ganhando a extensão certa quando falta. O ticket é validado estritamente (campos exatos, hex minúsculo, `chunkBytes` 1..65.536, `windowBytes` ≥ `chunkBytes`) e só vale para a oferta em andamento; qualquer outro é liberado com `file.cancel`. Fila sequencial de até 20 arquivos; o progresso exibido é o `received` do PC. O SHA-256 é calculado durante a leitura; se o arquivo render outro número de bytes, o envio é cancelado com "O arquivo mudou durante o envio." Sem `file.transfer` no welcome, o Android não mostra nem envia nada de arquivos. Exemplos de todas as mensagens em `protocol-v1.examples.json`, com as do socket de arquivos em `fileSocket`.
 
+Desde o desktop 0.6.0 a chave `allowFiles` não existe mais na interface: `files.allowed` é sempre `true` (o PC continua gravando `allowFiles:true` em `settings.json` para versões anteriores), e o recebimento não precisa ser liberado.
+
+## Extensão negociada files.v2 — qualquer arquivo de até 1 GB, nos dois sentidos (aplicativos 0.6.0)
+
+O Android 0.6 acrescenta a linha `X-PC-Remote-Features: files.v2` às de `input.v1` e `files.v1`. Desktop que não conhece files.v2 ignora o token e segue files.v1. O desktop 0.6 trata `files.v2` como files.v1 com as regras abaixo; um cliente que pede só files.v1 recebe exatamente o contrato anterior (PNG/JPG/PDF, 50 MB). Com files.v2 negociado, o welcome traz `file.transfer` **e** `file.receive`, e o snapshot traz `"files":{"allowed":true,"maxBytes":1073741824}`. `file.receive` no welcome é o sinal de que o PC aceitou files.v2.
+
+### Celular → PC com files.v2
+
+Mesmas mensagens e o mesmo socket de files.v1, com estas diferenças:
+
+| Regra | files.v1 | files.v2 |
+|---|---|---|
+| Tamanho | 1..52.428.800 | 1..1.073.741.824 (1 GiB); acima → `too_large` ("Arquivo excede 1 GB") |
+| `mime` | `image/png`, `image/jpeg`, `application/pdf`, casando com a extensão | Informativo: `tipo/subtipo` em minúsculas, até 127 bytes, só `a-z 0-9 ! # $ & ^ _ . + -` e uma `/`; formato inválido → `invalid_message`. O cliente usa `application/octet-stream` quando não sabe |
+| Extensão | obrigatória e casada com o MIME | Qualquer uma, inclusive nenhuma. Recusadas com `file_type`, depois da limpeza do nome: `lnk`, `url`, `scf`, `library-ms`, `searchconnector-ms`, `settingcontent-ms`, `appref-ms`, `website` e o nome `desktop.ini` (arquivos que o Explorador interpreta só por estar na pasta) |
+| Assinatura do conteúdo | conferida em `file.end` | não conferida |
+| Tempo total | 15 min | maior entre 15 min e 1 s por 256 KiB declarados (1 GiB ≈ 68 min) |
+
+Continuam iguais: nome limpo do mesmo jeito, ticket de 30 s, `chunkBytes` 65.536, `windowBytes` 1.048.576, progresso a cada 256 KiB, 20 s sem frames, SHA-256, `Zone.Identifier` com ZoneId=3 (o Windows SmartScreen avisa antes de executar um programa recebido) e movimento sem substituir. Espaço livre exigido: size + 64 MiB. Enquanto houver transferência em qualquer sentido o PC mantém um pedido de energia do Windows (`PowerCreateRequest` + `PowerSetRequest(PowerRequestSystemRequired)`, visível em `powercfg /requests` como "PC Remote: transferindo arquivo com o celular") para o PC não entrar em suspensão, e o retira ao terminar.
+
+### PC → celular (files.v2)
+
+O PC mantém uma fila própria (até 20 arquivos escolhidos no painel ou arrastados para a janela) e oferece um arquivo por vez, só a conexões com files.v2. A fila espera enquanto não há celular compatível conectado; nada é enviado a um celular sem `file.receive`.
+
+1. PC → celular, no socket de controle (evento sem `id`): `{"v":1,"type":"file.push","transferId":"uuid","name":"Relatório final.pdf","size":123456,"mime":"application/pdf","ticket":"<64 hex minúsculos>"}`. `name` já vem limpo pelo PC (mesma limpeza do recebimento, 1..255 bytes UTF-8, sem controles); `size` 1..1.073.741.824; `mime` como acima (o PC deduz pela extensão ou usa `application/octet-stream`); o ticket tem 32 bytes aleatórios, vale 30 s, é de uso único e fica vinculado ao dispositivo, ao epoch da conexão e ao transferId. Outro `file.push` só depois de `file.done`, erro, recusa, cancelamento ou expiração.
+2. O celular aceita sozinho: abre `/v1/files` em até 30 s e envia `{"v":1,"type":"file.fetch","id":"uuid","transferId":"uuid","ticket":"hex"}`. Para recusar (sem espaço, armazenamento indisponível), usa o controle: `{"kind":"file.decline","transferId":"uuid","code":"storage"}`, com `code` `storage` ou `unavailable`; resposta `ack`, sem snapshot. `file.cancel` com o mesmo transferId (antes ou durante o envio) cancela o push e também responde `ack`.
+3. O PC consome o ticket, confere validade, sessão e epoch (problema → `unauthorized`), responde `{"v":1,"type":"file.accept","id":"<id do fetch>","transferId":"uuid"}` e envia frames binários de 1..65.536 bytes, com no máximo 1.048.576 bytes enviados e ainda não confirmados.
+4. Celular → PC: `{"v":1,"type":"file.progress","transferId":"uuid","received":n}` a cada 256 KiB gravados e quando `received == size`. `received` nunca diminui nem passa do que o PC enviou.
+5. PC, depois de exatamente `size` bytes: `{"v":1,"type":"file.end","id":"uuid","transferId":"uuid","sha256":"<64 hex minúsculos>"}`.
+6. O celular confere tamanho e SHA-256, conclui a gravação e responde `{"v":1,"type":"file.done","id":"<id do end>","transferId":"uuid","name":"<nome final>"}`. O PC fecha com 1000.
+
+Erros usam o frame `error` padrão nos dois sentidos e fecham o socket; o celular apaga o que gravou. Celular → PC: `storage` (sem espaço ou falha ao gravar, retryable), `file_integrity` (tamanho ou SHA-256 diferentes, retryable), `invalid_message`, `internal`. PC → celular: `unauthorized` (ticket ou sessão), `unavailable` ("Envio cancelado no PC."), `storage` (falha ao ler o arquivo no PC; o arquivo mudou de tamanho durante o envio), `internal`. O PC aborta sem progresso por 20 s, no tempo total da tabela acima, com Cancelar no painel, `file.cancel`/`file.decline`, fim ou revogação da sessão de controle; o celular aborta sem bytes por 20 s ou se a conexão de controle cai. Nada é repetido automaticamente: o item que falhou sai da fila com o motivo.
+
+Armazenamento no Android: Android 10+ grava em `Download/PC Remote` pelo MediaStore (`IS_PENDING` durante a escrita; o próprio MediaStore escolhe `nome (1).ext` se já existir); Android 7 a 9, na pasta de downloads do próprio app (`Android/data/com.pcremote.nativeandroid/files/Download/PC Remote`), sem pedir permissão. Espaço livre exigido: size + 64 MiB. Ao concluir, uma notificação "Arquivo recebido do PC" abre o arquivo (Android 10+). O Android mantém em RAM os últimos 12 arquivos recebidos e enviados (nome, tamanho, horário).
+
+Celular → PC no Android 0.6: o seletor (`ACTION_OPEN_DOCUMENT` com `*/*`) e o Compartilhar (`ACTION_SEND`/`ACTION_SEND_MULTIPLE` com `*/*`) aceitam qualquer arquivo; com PC files.v1 o celular só oferece PNG/JPG/PDF de até 50 MB e explica o motivo dos demais. Enquanto houver transferência e o app tiver começado em primeiro plano, um serviço em primeiro plano do tipo `dataSync` mostra o progresso e impede que o Android congele o processo; ele termina com a fila.
+
+## Extensão negociada search.v1 — pesquisa no YouTube (aplicativos 0.6.0)
+
+Linha `X-PC-Remote-Features: search.v1`. Só com ela o welcome traz `search.youtube`. Ação:
+
+| kind | Campos | Regras / resultado |
+|---|---|---|
+| search.open | service: `youtube`; query: string | query de 1 a 200 caracteres Unicode, sem caracteres de controle e não só espaços (o PC remove os espaços das pontas), senão `invalid_message`. Não negociado → `unavailable`. Mais de 5 pesquisas em 10 s → `rate_limited`. O PC monta sozinho `https://www.youtube.com/results?search_query=<query em UTF-8, codificada como formulário>` e o abre no navegador padrão com ShellExecute; falha → `unavailable`. `ack` depois que o Windows aceitou abrir, sem snapshot |
+
+Não existe abertura de endereço arbitrário: o celular manda só o texto da pesquisa, e a origem é fixa no PC.
+
+## Extensão negociada info.v1 — sistema do PC (aplicativos 0.6.0)
+
+Linha `X-PC-Remote-Features: info.v1`. Só com ela o welcome traz o campo extra `"os":"Windows 11"` (1..64 bytes UTF-8, sem controles), lido do registro do Windows (build 22000 ou maior = Windows 11). O Android mostra esse texto abaixo do nome do PC e o guarda para exibir enquanto desconectado; não o usa para decisões.
+
 ## Compatibilidade
 
 | Android | Desktop | Protocolo | Resultado |
@@ -132,8 +189,11 @@ Cliente Android: fontes são o seletor do sistema (`ACTION_OPEN_DOCUMENT` com pn
 | sem files.v1 | com files.v1 | 1 (+ input.v1) | Sem capacidade nem campo de estado novos; formato anterior |
 | com files.v1 | até 0.3.0 | 1 + input.v1 | Desktop lê só a primeira linha do header; arquivos indisponíveis |
 | com files.v1 | com files.v1 | 1 + input.v1 + files.v1 | Imagens e PDFs após permitir no PC |
+| 0.4.x / 0.5.x | 0.6.x | 1 + input.v1 + files.v1 | Formato anterior; arquivos e mouse/teclado já liberados no PC; clipboard sincroniza quando o celular liga as direções |
+| 0.6.x | 0.4.x / 0.5.x | 1 + input.v1 + files.v1 | O PC ignora files.v2, search.v1 e info.v1: só PNG/JPG/PDF de até 50 MB do celular para o PC, sem PC → celular, sem pesquisa por voz no PC, sem nome do sistema; clipboard e mouse/teclado ainda pedem as chaves do PC |
+| 0.6.x | 0.6.x | 1 + input.v1 + files.v1 + files.v2 + search.v1 + info.v1 | Tudo pronto após o pareamento: arquivos de até 1 GB nos dois sentidos, clipboard em tempo real, touchpad, pesquisa por voz |
 | 0.1.x / 0.2.x | versão sem protocolo 1 | outro | Rejeitado com version_mismatch |
 
 ## Ciclo de vida e extensão
 
-Backoff com jitter 1,2,4,8,16,30 s; somente tentativa de conexão/autenticação, sem replay de ações. Heartbeat nativo WebSocket; suspensão/rede provocam nova autenticação e snapshot. Adicionar ações em enum tipada, validar autorização/capacidade antes do dispatch. Não existe endpoint shell, execução arbitrária, abertura automática de links, encaminhamento de portas ou nuvem.
+Backoff com jitter 1,2,4,8,16,30 s; somente tentativa de conexão/autenticação, sem replay de ações. Heartbeat nativo WebSocket; suspensão/rede provocam nova autenticação e snapshot. Adicionar ações em enum tipada, validar autorização/capacidade antes do dispatch. Não existe endpoint shell, execução arbitrária, abertura de endereços enviados pelo celular (a pesquisa de search.v1 tem origem fixa no PC), encaminhamento de portas ou nuvem.

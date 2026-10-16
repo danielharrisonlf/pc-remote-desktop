@@ -646,5 +646,323 @@
         "data": "AAAA"
       }
     ]
+  },
+  "negotiated06": {
+    "headers": [
+      "input.v1",
+      "files.v1",
+      "files.v2",
+      "search.v1",
+      "info.v1"
+    ],
+    "client": [
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf6a0",
+        "action": {
+          "kind": "file.offer",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02",
+          "name": "Viagem 2026.mp4",
+          "size": 734003200,
+          "mime": "video/mp4"
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf6a1",
+        "action": {
+          "kind": "file.offer",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02",
+          "name": "notas",
+          "size": 1073741824,
+          "mime": "application/octet-stream"
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf6a2",
+        "action": {
+          "kind": "file.decline",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02",
+          "code": "storage"
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf6a3",
+        "action": {
+          "kind": "search.open",
+          "service": "youtube",
+          "query": "vídeos de Node.js"
+        }
+      }
+    ],
+    "server": [
+      {
+        "v": 1,
+        "type": "welcome",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf632",
+        "pcId": "36c7f5c2-9a39-43a5-a541-082f745dfd01",
+        "pcName": "PC de teste",
+        "capabilities": [
+          "audio",
+          "media",
+          "clipboard.text",
+          "input.control",
+          "file.transfer",
+          "file.receive",
+          "search.youtube"
+        ],
+        "os": "Windows 11"
+      },
+      {
+        "v": 1,
+        "type": "state",
+        "revision": 1,
+        "audio": {
+          "available": true,
+          "percent": 35,
+          "muted": false,
+          "error": null
+        },
+        "media": {
+          "sessions": [
+            {
+              "id": "session-1",
+              "app": "Spotify",
+              "title": "Título",
+              "playing": true,
+              "capabilities": {
+                "play": true,
+                "pause": true,
+                "previous": true,
+                "next": true,
+                "seek": true
+              },
+              "positionSeconds": 20
+            }
+          ]
+        },
+        "clipboardRevision": 0,
+        "sync": {
+          "upload": true,
+          "download": true,
+          "paused": false
+        },
+        "input": {
+          "allowed": true,
+          "enabled": false
+        },
+        "files": {
+          "allowed": true,
+          "maxBytes": 1073741824
+        }
+      },
+      {
+        "v": 1,
+        "type": "file.push",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02",
+        "name": "Relatório final.pdf",
+        "size": 123456,
+        "mime": "application/pdf",
+        "ticket": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00"
+      },
+      {
+        "v": 1,
+        "type": "error",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf6a0",
+        "code": "too_large",
+        "message": "Arquivo excede 1 GB",
+        "retryable": false
+      },
+      {
+        "v": 1,
+        "type": "error",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf6a3",
+        "code": "rate_limited",
+        "message": "Muitas tentativas. Tente depois.",
+        "retryable": true
+      }
+    ],
+    "invalidClient": [
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf7a0",
+        "action": {
+          "kind": "file.offer",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02",
+          "name": "atalho.lnk",
+          "size": 10,
+          "mime": "application/octet-stream"
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf7a1",
+        "action": {
+          "kind": "file.offer",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02",
+          "name": "filme.mkv",
+          "size": 1073741825,
+          "mime": "video/x-matroska"
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf7a2",
+        "action": {
+          "kind": "file.offer",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02",
+          "name": "filme.mkv",
+          "size": 10,
+          "mime": "Video/MKV; x=1"
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf7a3",
+        "action": {
+          "kind": "file.decline",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02",
+          "code": "busy"
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf7a4",
+        "action": {
+          "kind": "search.open",
+          "service": "youtube",
+          "query": "   "
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf7a5",
+        "action": {
+          "kind": "search.open",
+          "service": "spotify",
+          "query": "Coldplay"
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf7a6",
+        "action": {
+          "kind": "search.open",
+          "service": "youtube",
+          "query": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf7a7",
+        "action": {
+          "kind": "search.open",
+          "service": "youtube",
+          "query": "linha\nquebrada"
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf7a8",
+        "action": {
+          "kind": "search.open",
+          "service": "youtube",
+          "query": "gatos",
+          "url": "https://example.org"
+        }
+      }
+    ],
+    "fileSocket": {
+      "client": [
+        {
+          "v": 1,
+          "type": "file.fetch",
+          "id": "b55b9812-02e7-45a8-9fc6-0411b29cf7a1",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02",
+          "ticket": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00"
+        },
+        {
+          "v": 1,
+          "type": "file.progress",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02",
+          "received": 262144
+        },
+        {
+          "v": 1,
+          "type": "file.done",
+          "id": "b55b9812-02e7-45a8-9fc6-0411b29cf7a3",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02",
+          "name": "Relatório final (1).pdf"
+        },
+        {
+          "v": 1,
+          "type": "error",
+          "id": "b55b9812-02e7-45a8-9fc6-0411b29cf7a3",
+          "code": "storage",
+          "message": "Sem espaço no celular",
+          "retryable": true
+        }
+      ],
+      "server": [
+        {
+          "v": 1,
+          "type": "file.accept",
+          "id": "b55b9812-02e7-45a8-9fc6-0411b29cf7a1",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02"
+        },
+        {
+          "v": 1,
+          "type": "file.end",
+          "id": "b55b9812-02e7-45a8-9fc6-0411b29cf7a3",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02",
+          "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+        },
+        {
+          "v": 1,
+          "type": "error",
+          "id": "00000000-0000-0000-0000-000000000000",
+          "code": "unavailable",
+          "message": "Envio cancelado no PC.",
+          "retryable": false
+        }
+      ],
+      "invalidClient": [
+        {
+          "v": 1,
+          "type": "file.fetch",
+          "id": "b55b9812-02e7-45a8-9fc6-0411b29cf7a4",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02",
+          "ticket": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "path": "C:\\\\"
+        },
+        {
+          "v": 1,
+          "type": "file.progress",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02",
+          "received": -1
+        },
+        {
+          "v": 1,
+          "type": "file.done",
+          "id": "b55b9812-02e7-45a8-9fc6-0411b29cf7a5",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e02"
+        }
+      ]
+    }
   }
 }

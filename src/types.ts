@@ -23,13 +23,13 @@ export interface PendingDevice {
   requestedAt: number;
 }
 
+/** Files and mouse/keyboard need no switch: they work after pairing. */
 export interface Settings {
-  upload: boolean;
-  download: boolean;
-  paused: boolean;
+  /** Automatic clipboard sync in both directions; manual actions never depend on it. */
+  realtime: boolean;
   autostart: boolean;
-  allowInput: boolean;
-  allowFiles: boolean;
+  /** Set by "Interromper"; only "Liberar" clears it. */
+  inputBlocked: boolean;
 }
 
 export interface DiagnosticEntry {
@@ -48,12 +48,29 @@ export interface TransferEntry {
   automatic: boolean;
 }
 
-/** A file saved in Downloads\PC Remote. Metadata only, kept in RAM by the backend. */
-export interface ReceivedFile {
+/** A file received from (`toPc`) or sent to (`toPhone`) the phone. Metadata only, kept in RAM. */
+export interface FileEntry {
   /** Unix milliseconds. */
   at: number;
   name: string;
   bytes: number;
+  direction: TransferDirection;
+}
+
+/** The file being offered or sent to the phone. */
+export interface OutgoingFile {
+  name: string;
+  bytes: number;
+  /** Bytes the phone confirmed it wrote. */
+  sent: number;
+  /** Announced, waiting for the phone to start. */
+  waiting: boolean;
+}
+
+export interface OutgoingResult {
+  at: number;
+  ok: boolean;
+  message: string;
 }
 
 /** The upload in progress, if any. */
@@ -78,9 +95,15 @@ export interface DesktopStatus {
   diagnostics: DiagnosticEntry[];
   /** Newest first. */
   transfers: TransferEntry[];
-  /** Newest first, at most 12. */
-  receivedFiles: ReceivedFile[];
+  /** Both directions, newest first, at most 12. */
+  fileHistory: FileEntry[];
   incomingFile: IncomingFile | null;
+  outgoing: OutgoingFile | null;
+  /** Names waiting to go to the phone, in order. */
+  outgoingQueue: string[];
+  outgoingResult: OutgoingResult | null;
+  /** The connected phone accepts files from the PC (Android 0.6+). */
+  phoneReceivesFiles: boolean;
 }
 
 /** Mirrors `update::UpdateInfo` in src-tauri/src/update.rs: a newer version from latest.json. */

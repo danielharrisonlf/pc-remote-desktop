@@ -36,7 +36,7 @@ fn worker() -> &'static Sender<Task> {
             .name("pc-remote-media-mta".into())
             .spawn(move || {
                 let _ = with_com(|| {
-                    let mut registry = Vec::<Entry>::new();
+                    let mut registry = Registry::default();
                     while let Ok(task) = rx.recv() {
                         match task {
                             Task::Read(reply) => {
@@ -64,24 +64,106 @@ fn worker() -> &'static Sender<Task> {
     })
 }
 
-fn refresh(registry: &mut Vec<Entry>) -> Result<(), String> {
+/// One manager for the worker's lifetime: sessions keep their COM identity, and with it
+/// their UUID, across reads. A failed manager is dropped and requested again next time.
+#[derive(Default)]
+struct Registry {
+    manager: Option<Manager>,
+    entries: Vec<Entry>,
+}
+
+fn manager(registry: &mut Registry) -> Result<Manager, String> {
+    if let Some(manager) = &registry.manager {
+        return Ok(manager.clone());
+    }
     let manager = Manager::RequestAsync()
         .map_err(|e| e.to_string())?
         .join()
         .map_err(|e| e.to_string())?;
-    let view = manager.GetSessions().map_err(|e| e.to_string())?;
-    let mut current = Vec::new();
-    for i in 0..view.Size().map_err(|e| e.to_string())? {
-        let session = view.GetAt(i).map_err(|e| e.to_string())?;
-        let id = registry
-            .iter()
-            .find(|e| e.session == session)
-            .map(|e| e.id.clone())
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
-        current.push(Entry { id, session });
-    }
-    *registry = current;
+    registry.manager = Some(manager.clone());
+    Ok(manager)
+}
+
+/// Re-lists the sessions: Windows' current one first, then those playing, then the rest.
+fn refresh(registry: &mut Registry) -> Result<(), String> {
+    let manager = manager(registry)?;
+    let listed = (|| {
+        let view = manager.GetSessions()?;
+        let mut sessions = Vec::new();
+        for i in 0..view.Size()? {
+            sessions.push(view.GetAt(i)?);
+        }
+        Ok::<_, windows::core::Error>(sessions)
+    })();
+    let sessions = match listed {
+        Ok(sessions) => sessions,
+        Err(error) => {
+            registry.manager = None;
+            return Err(error.to_string());
+        }
+    };
+    let current = manager.GetCurrentSession().ok();
+    let playing = |session: &Session| {
+        session
+            .GetPlaybackInfo()
+            .and_then(|info| info.PlaybackStatus())
+            .is_ok_and(|status| status == PlaybackStatus::Playing)
+    };
+    let mut entries: Vec<(u8, Entry)> = sessions
+        .into_iter()
+        .map(|session| {
+            let id = registry
+                .entries
+                .iter()
+                .find(|e| e.session == session)
+                .map(|e| e.id.clone())
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
+            let rank = if current.as_ref() == Some(&session) {
+                0
+            } else if playing(&session) {
+                1
+            } else {
+                2
+            };
+            (rank, Entry { id, session })
+        })
+        .collect();
+    // Stable: equal ranks keep the order Windows listed them in.
+    entries.sort_by_key(|(rank, _)| *rank);
+    registry.entries = entries.into_iter().map(|(_, entry)| entry).collect();
     Ok(())
+}
+
+/// A readable player name for common AppUserModelIDs; others pass through.
+pub fn friendly_app(aumid: &str) -> String {
+    let lower = aumid.to_ascii_lowercase();
+    let known = [
+        ("spotify", "Spotify"),
+        ("chrome", "Google Chrome"),
+        ("msedge", "Microsoft Edge"),
+        ("firefox", "Firefox"),
+        ("308046b0af4a39cb", "Firefox"),
+        ("opera", "Opera"),
+        ("brave", "Brave"),
+        ("vlc", "VLC"),
+        ("microsoft.zunemusic", "Reprodutor Multimídia"),
+        ("microsoft.zunevideo", "Filmes e TV"),
+        ("wmplayer", "Windows Media Player"),
+        ("msteams", "Microsoft Teams"),
+        ("applemusic", "Apple Music"),
+        ("itunes", "iTunes"),
+        ("deezer", "Deezer"),
+        ("tidal", "TIDAL"),
+        ("amazon music", "Amazon Music"),
+        ("foobar2000", "foobar2000"),
+        ("mpc-hc", "MPC-HC"),
+        ("potplayer", "PotPlayer"),
+    ];
+    known
+        .iter()
+        .find(|(needle, _)| lower.contains(needle))
+        .map(|(_, name)| name.to_string())
+        .unwrap_or_else(|| aumid.to_string())
 }
 
 fn timeline_bounds(session: &Session) -> Option<(i64, i64, i64)> {
@@ -126,18 +208,19 @@ fn timeline_bounds(session: &Session) -> Option<(i64, i64, i64)> {
     Some((min, max, predicted))
 }
 
-fn read_inside(registry: &mut Vec<Entry>) -> MediaState {
+fn read_inside(registry: &mut Registry) -> MediaState {
     if refresh(registry).is_err() {
-        registry.clear();
+        registry.entries.clear();
         return MediaState {
             sessions: Vec::new(),
         };
     }
     let sessions = registry
+        .entries
         .iter()
         .filter_map(|entry| {
             let session = &entry.session;
-            let app = session.SourceAppUserModelId().ok()?.to_string();
+            let app = friendly_app(&session.SourceAppUserModelId().ok()?.to_string());
             let info = session.GetPlaybackInfo().ok()?;
             let controls = info.Controls().ok()?;
             let playing = info.PlaybackStatus().ok()? == PlaybackStatus::Playing;
@@ -170,13 +253,14 @@ fn read_inside(registry: &mut Vec<Entry>) -> MediaState {
 }
 
 fn control_inside(
-    registry: &mut Vec<Entry>,
+    registry: &mut Registry,
     id: &str,
     command: &MediaCommand,
     offset: Option<i8>,
 ) -> Result<(), String> {
     refresh(registry)?;
     let session = &registry
+        .entries
         .iter()
         .find(|e| e.id == id)
         .ok_or("Sessão de mídia indisponível")?
@@ -263,6 +347,49 @@ mod tests {
     #[test]
     fn windows_gsmtc_read_smoke() {
         let _ = read();
+    }
+    /// Needs a player with an open session (YouTube in a browser, Spotify…).
+    #[test]
+    #[ignore = "requires an active media session on the host"]
+    fn windows_gsmtc_session_ids_are_stable_across_reads() {
+        let first = read();
+        assert!(!first.sessions.is_empty(), "no media session");
+        for _ in 0..5 {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            let again = read();
+            let ids = |state: &MediaState| {
+                let mut ids: Vec<_> = state.sessions.iter().map(|s| s.id.clone()).collect();
+                ids.sort();
+                ids
+            };
+            assert_eq!(ids(&first), ids(&again));
+        }
+        for session in &read().sessions {
+            eprintln!(
+                "{} | {} | playing={} | pos={:?} | {:?}",
+                session.app,
+                session.title,
+                session.playing,
+                session.position_seconds.map(|p| p as u64),
+                session.capabilities
+            );
+        }
+    }
+    #[test]
+    fn friendly_names_for_common_players() {
+        assert_eq!(friendly_app("Spotify.exe"), "Spotify");
+        assert_eq!(friendly_app("Chrome"), "Google Chrome");
+        assert_eq!(friendly_app("MSEdge"), "Microsoft Edge");
+        assert_eq!(friendly_app("308046B0AF4A39CB"), "Firefox");
+        assert_eq!(
+            friendly_app("Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"),
+            "Reprodutor Multimídia"
+        );
+        assert_eq!(
+            friendly_app("MSTeams_8wekyb3d8bbwe!MSTeams"),
+            "Microsoft Teams"
+        );
+        assert_eq!(friendly_app("Contoso.Player"), "Contoso.Player");
     }
     #[test]
     fn queued_media_action_requires_current_permission_before_execution() {

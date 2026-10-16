@@ -34,6 +34,43 @@ pub fn open(url: &str) -> Result<(), String> {
         .map_err(|()| "Não foi possível abrir o navegador padrão.".into())
 }
 
+const YOUTUBE_SEARCH: &str = "https://www.youtube.com/results?search_query=";
+
+/// application/x-www-form-urlencoded: space as `+`, unreserved bytes kept, the rest `%XX`.
+fn form_encode(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() * 3);
+    for byte in text.bytes() {
+        match byte {
+            b' ' => out.push('+'),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'*' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// search.v1: the phone sends only the words; the origin is fixed here.
+pub fn youtube_search_url(query: &str) -> String {
+    format!("{YOUTUBE_SEARCH}{}", form_encode(query))
+}
+
+/// Opens the search in the default browser. Runs on a blocking thread, so it sets up COM for ShellExecute.
+pub fn open_youtube_search(query: &str) -> Result<(), ()> {
+    use windows::Win32::System::Com::{
+        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+    };
+    let url = youtube_search_url(query);
+    let initialized =
+        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) }.is_ok();
+    let opened = shell_open(&windows::core::HSTRING::from(url.as_str()));
+    if initialized {
+        unsafe { CoUninitialize() };
+    }
+    opened
+}
+
 /// Opens a directory in Explorer. The caller passes the app's own received-files folder.
 pub fn open_folder(folder: &std::path::Path) -> Result<(), String> {
     if !folder.is_dir() {
@@ -68,7 +105,33 @@ fn shell_open(target: &windows::core::HSTRING) -> Result<(), ()> {
 
 #[cfg(test)]
 mod tests {
-    use super::validate;
+    use super::{validate, youtube_search_url};
+
+    #[test]
+    fn search_urls_encode_every_query_into_the_fixed_origin() {
+        assert_eq!(
+            youtube_search_url("vídeos de Node.js"),
+            "https://www.youtube.com/results?search_query=v%C3%ADdeos+de+Node.js"
+        );
+        for hostile in [
+            "a&search_query=b",
+            "x#frag",
+            "../../etc",
+            "https://evil.example",
+            "a?b=c",
+            "\"><script>",
+        ] {
+            let url = youtube_search_url(hostile);
+            let rest = url
+                .strip_prefix("https://www.youtube.com/results?search_query=")
+                .unwrap();
+            assert!(
+                rest.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-_.*+%".contains(&b)),
+                "{url}"
+            );
+        }
+    }
 
     #[test]
     fn accepts_project_release_pages_and_assets() {
