@@ -16,7 +16,7 @@ pub struct Device {
     pub token_hash: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Secrets {
     pub pc_id: Uuid,
     pub certificate_pem: String,

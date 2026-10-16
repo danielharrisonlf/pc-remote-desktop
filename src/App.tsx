@@ -31,6 +31,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [qrImage, setQrImage] = useState<string | null>(null);
   const latestRefresh = useRef(0);
@@ -44,10 +45,10 @@ function App() {
       const next = await desktopApi.getStatus();
       if (requestNumber === latestRefresh.current) {
         setStatus(next);
-        setError(null);
+        setConnectionError(null);
       }
     } catch (reason) {
-      if (requestNumber === latestRefresh.current) setError(errorMessage(reason));
+      if (requestNumber === latestRefresh.current) setConnectionError(errorMessage(reason));
     } finally {
       if (!silent) setLoading(false);
     }
@@ -94,6 +95,7 @@ function App() {
   }
 
   async function copyText(value: string, label: string) {
+    setError(null);
     try {
       await navigator.clipboard.writeText(value);
       setMessage(`${label} copiado.`);
@@ -105,7 +107,8 @@ function App() {
   const address = preferredAddress(status?.addresses ?? []);
   const connected = status?.devices.filter(device => device.connected).length ?? 0;
   const pairing = status?.pairing;
-  const serviceOffline = Boolean(error) || status?.serviceRunning === false;
+  const serviceOffline = Boolean(connectionError) || status?.serviceRunning === false;
+  const displayedError = error ?? connectionError;
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -119,14 +122,14 @@ function App() {
       <div className="sidebar-bottom">
         <div className="local-badge"><LockKeyhole size={15} /> Rede local · criptografado</div>
         <button className="theme-button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>Tema {theme === 'light' ? 'escuro' : 'claro'}</button>
-        <span className="version">DESKTOP 0.2.1 · PROTOCOLO 1</span>
+        <span className="version">DESKTOP 0.2.2 · PROTOCOLO 1</span>
       </div>
     </aside>
 
     <main className="main-content">
       <header className="topbar"><div className="breadcrumbs">PC REMOTE <ChevronRight size={13} /> {pageLabels[page].toUpperCase()}</div><div className={`connection-pill ${serviceOffline ? 'offline' : ''}`}><span />{serviceOffline ? 'Serviço indisponível' : status ? 'Serviço ativo' : 'Conectando...'}</div></header>
       <div className="content">
-        {error && <div className="notice error" role="alert"><WifiOff size={18} /><span>{error}</span><button onClick={() => { void refresh(); }} aria-label="Tentar novamente"><RefreshCw size={17} /></button></div>}
+        {displayedError && <div className="notice error" role="alert"><WifiOff size={18} /><span>{displayedError}</span><button onClick={() => { if (error) setError(null); else void refresh(); }} aria-label={error ? 'Fechar erro' : 'Tentar novamente'}>{error ? '×' : <RefreshCw size={17} />}</button></div>}
         {message && <div className="notice success" role="status"><Check size={18} /><span>{message}</span><button onClick={() => setMessage(null)} aria-label="Fechar mensagem">×</button></div>}
         {loading && !status ? <div className="loading"><RefreshCw className="spin" size={24} /> Lendo estado do serviço…</div> : null}
         {!status ? null : page === 'overview' ? <>

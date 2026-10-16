@@ -62,6 +62,7 @@ pub struct Runtime {
     pub connected: Option<Uuid>,
     pub connection_epoch: u64,
     pub failed_pairs: VecDeque<Instant>,
+    pub revoked_devices: HashSet<Uuid>,
     pub audio: AudioState,
     pub media: MediaState,
     pub revision: u64,
@@ -162,6 +163,7 @@ impl Core {
                 connected: None,
                 connection_epoch: 0,
                 failed_pairs: VecDeque::new(),
+                revoked_devices: HashSet::new(),
                 audio: audio::read(),
                 media: media::read(),
                 revision: 0,
@@ -231,12 +233,14 @@ impl Core {
         }
         let hash = Sha256::digest(token.as_bytes());
         let mut s = self.state.lock().unwrap();
-        if !s.secrets.devices.iter().any(|d| {
-            d.id == id
-                && hex::decode(&d.token_hash)
-                    .ok()
-                    .is_some_and(|h| constant_time_eq(&h, &hash))
-        }) {
+        if s.revoked_devices.contains(&id)
+            || !s.secrets.devices.iter().any(|d| {
+                d.id == id
+                    && hex::decode(&d.token_hash)
+                        .ok()
+                        .is_some_and(|h| constant_time_eq(&h, &hash))
+            })
+        {
             return Err("unauthorized");
         }
         if s.connected.is_some_and(|current| current != id) {
@@ -257,12 +261,15 @@ impl Core {
         let s = self.state.lock().unwrap();
         s.connected == Some(id)
             && s.connection_epoch == epoch
+            && !s.revoked_devices.contains(&id)
             && s.secrets.devices.iter().any(|d| d.id == id)
     }
     #[cfg(test)]
     pub fn is_authorized_connection(&self, id: Uuid) -> bool {
         let s = self.state.lock().unwrap();
-        s.connected == Some(id) && s.secrets.devices.iter().any(|d| d.id == id)
+        s.connected == Some(id)
+            && !s.revoked_devices.contains(&id)
+            && s.secrets.devices.iter().any(|d| d.id == id)
     }
     pub fn disconnect(&self, id: Uuid, epoch: u64) {
         let mut s = self.state.lock().unwrap();
@@ -275,28 +282,67 @@ impl Core {
         }
     }
     pub fn revoke(&self, id: Uuid) -> Result<(), String> {
+        self.revoke_with_save(id, |candidate| {
+            if self.persist_secrets {
+                secrets::save(candidate)?;
+            }
+            Ok(())
+        })
+    }
+    fn revoke_with_save(
+        &self,
+        id: Uuid,
+        save: impl FnOnce(&Secrets) -> Result<(), String>,
+    ) -> Result<(), String> {
         let mut s = self.state.lock().unwrap();
-        let count = s.secrets.devices.len();
-        s.secrets.devices.retain(|d| d.id != id);
-        if s.secrets.devices.len() == count {
+        if !s.secrets.devices.iter().any(|d| d.id == id) {
             return Err("Dispositivo não encontrado".into());
         }
-        if self.persist_secrets {
-            secrets::save(&s.secrets)?;
-        }
+        // Deny reconnection in this process even if durable revocation fails.
+        // Keep the credential list consistent with disk for a deletion retry.
+        s.revoked_devices.insert(id);
         if s.connected == Some(id) {
             s.connected = None;
+            s.connection_epoch = s.connection_epoch.wrapping_add(1);
+            s.client_sync = SyncSettings::default();
             s.input_feature = false;
             s.input_enabled = false;
             s.input_events.clear();
+            s.revision += 1;
             let _ = self.events.send(Outgoing::Close { device_id: id });
         }
+        let mut candidate = s.secrets.clone();
+        candidate.devices.retain(|d| d.id != id);
+        save(&candidate).map_err(|error| format!(
+            "Não foi possível salvar a revogação: {error}. Acesso bloqueado nesta execução; tente revogar novamente. Reiniciar antes de concluir pode restaurar o acesso."
+        ))?;
+        s.secrets = candidate;
         Ok(())
     }
     pub fn update_settings(&self, new: Settings) -> Result<(), String> {
-        settings::set_autostart(new.autostart)?;
-        settings::save(&new)?;
+        self.update_settings_with_io(new, settings::set_autostart, settings::save)
+    }
+    fn update_settings_with_io(
+        &self,
+        new: Settings,
+        mut set_autostart: impl FnMut(bool) -> Result<(), String>,
+        save: impl FnOnce(&Settings) -> Result<(), String>,
+    ) -> Result<(), String> {
         let mut s = self.state.lock().unwrap();
+        let autostart_changed = new.autostart != s.settings.autostart;
+        if autostart_changed {
+            set_autostart(new.autostart)?;
+        }
+        if let Err(error) = save(&new) {
+            if autostart_changed {
+                if let Err(rollback) = set_autostart(s.settings.autostart) {
+                    return Err(format!(
+                        "{error}; falha ao restaurar inicialização: {rollback}"
+                    ));
+                }
+            }
+            return Err(error);
+        }
         s.settings = new;
         if !s.settings.allow_input {
             s.input_enabled = false;
@@ -329,6 +375,7 @@ impl Core {
         let s = self.state.lock().unwrap();
         s.connected == Some(id)
             && s.connection_epoch == epoch
+            && !s.revoked_devices.contains(&id)
             && s.input_feature
             && s.input_enabled
             && s.settings.allow_input
@@ -337,6 +384,7 @@ impl Core {
         let mut s = self.state.lock().unwrap();
         if s.connected != Some(id)
             || s.connection_epoch != epoch
+            || s.revoked_devices.contains(&id)
             || !s.secrets.devices.iter().any(|d| d.id == id)
         {
             return Err("unauthorized".into());
@@ -372,6 +420,7 @@ impl Core {
         let mut s = self.state.lock().unwrap();
         if s.connected != Some(id)
             || s.connection_epoch != epoch
+            || s.revoked_devices.contains(&id)
             || !s.secrets.devices.iter().any(|d| d.id == id)
         {
             return Err("unauthorized".into());
@@ -439,7 +488,9 @@ impl Core {
         let permitted = s.settings.upload
             && !s.settings.paused
             && s.client_sync.download
-            && !s.client_sync.paused;
+            && !s.client_sync.paused
+            && s.connected
+                .is_some_and(|id| !s.revoked_devices.contains(&id));
         let text = if permitted && s.connected.is_some() {
             clipboard::read().ok().flatten()
         } else {
@@ -513,7 +564,8 @@ impl Core {
         if duplicate {
             return Ok(());
         }
-        let seq = clipboard::write(text)?;
+        let expected_sequence = automatic.then_some(s.clipboard_sequence);
+        let seq = clipboard::write_checked(text, expected_sequence)?;
         s.suppressed_sequence = seq;
         s.clipboard_sequence = seq;
         s.clipboard_revision += 1;
@@ -726,6 +778,167 @@ mod tests {
         assert!(core.connect_authenticated(device, &token, false).is_err());
     }
     #[test]
+    fn failed_revocation_closes_session_and_preserves_durable_credentials_for_retry() {
+        let core = test_core();
+        let id = Uuid::new_v4();
+        let token = random_hex();
+        core.state.lock().unwrap().secrets.devices.push(Device {
+            id,
+            name: "Revocation test".into(),
+            token_hash: secrets::token_hash(&token),
+        });
+        let epoch = core.connect_authenticated(id, &token, true).unwrap();
+        {
+            let mut s = core.state.lock().unwrap();
+            s.settings.allow_input = true;
+            s.input_enabled = true;
+            s.client_sync.upload = true;
+            s.client_sync.download = true;
+        }
+        let mut events = core.events.subscribe();
+        let failure = core.revoke_with_save(id, |candidate| {
+            assert!(!candidate.devices.iter().any(|d| d.id == id));
+            Err("disk full".into())
+        });
+        let error = failure.unwrap_err();
+        assert!(error.contains("disk full"));
+        assert!(error.contains("Acesso bloqueado nesta execução"));
+        assert!(error.contains("Reiniciar"));
+        assert!(matches!(events.try_recv(), Ok(Outgoing::Close { device_id }) if device_id == id));
+        assert!(!core.is_authorized_session(id, epoch));
+        assert_eq!(
+            core.execute_input(id, epoch, &Action::PointerMove { dx: 1, dy: 0 }),
+            Err("unauthorized".into())
+        );
+        {
+            let s = core.state.lock().unwrap();
+            assert_eq!(s.secrets.devices.len(), 1);
+            assert!(s.connected.is_none());
+            assert!(!s.input_feature && !s.input_enabled);
+            assert!(!s.client_sync.upload && !s.client_sync.download);
+        }
+        // Disk and RAM retain the old hash, but automatic reconnection is denied.
+        assert_eq!(
+            core.connect_authenticated(id, &token, true),
+            Err("unauthorized")
+        );
+        core.revoke_with_save(id, |_| Ok(())).unwrap();
+        assert!(core.connect_authenticated(id, &token, true).is_err());
+    }
+    #[test]
+    fn settings_failure_restores_autostart_and_keeps_live_preferences() {
+        let core = test_core();
+        let old = serde_json::to_value(&core.status().settings).unwrap();
+        let mut changes = Vec::new();
+        let new = Settings {
+            autostart: true,
+            allow_input: true,
+            ..Settings::default()
+        };
+        assert_eq!(
+            core.update_settings_with_io(
+                new,
+                |value| {
+                    changes.push(value);
+                    Ok(())
+                },
+                |_| Err("settings disk failure".into()),
+            ),
+            Err("settings disk failure".into())
+        );
+        assert_eq!(changes, vec![true, false]);
+        assert_eq!(serde_json::to_value(&core.status().settings).unwrap(), old);
+    }
+    #[test]
+    fn settings_reports_rollback_failure_and_skips_unchanged_autostart() {
+        let core = test_core();
+        let mut calls = 0;
+        let result = core.update_settings_with_io(
+            Settings {
+                autostart: true,
+                ..Settings::default()
+            },
+            |_| {
+                calls += 1;
+                if calls == 1 {
+                    Ok(())
+                } else {
+                    Err("registry rollback failed".into())
+                }
+            },
+            |_| Err("settings disk failure".into()),
+        );
+        let error = result.unwrap_err();
+        assert!(error.contains("settings disk failure"));
+        assert!(error.contains("registry rollback failed"));
+        assert!(!core.status().settings.autostart);
+        core.update_settings_with_io(
+            Settings {
+                upload: true,
+                ..Settings::default()
+            },
+            |_| panic!("unchanged autostart must not touch registry"),
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert!(core.status().settings.upload);
+    }
+    #[test]
+    fn concurrent_settings_updates_serialize_persistence_and_live_publication() {
+        use std::sync::mpsc;
+        let core = test_core();
+        let persisted = Arc::new(Mutex::new(Settings::default()));
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (second_saved_tx, second_saved_rx) = mpsc::channel();
+        let first_core = core.clone();
+        let first_disk = persisted.clone();
+        let first = std::thread::spawn(move || {
+            first_core.update_settings_with_io(
+                Settings {
+                    upload: true,
+                    ..Settings::default()
+                },
+                |_| panic!("autostart is unchanged"),
+                |value| {
+                    started_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    *first_disk.lock().unwrap() = value.clone();
+                    Ok(())
+                },
+            )
+        });
+        started_rx.recv().unwrap();
+        let second_core = core.clone();
+        let second_disk = persisted.clone();
+        let second = std::thread::spawn(move || {
+            second_core.update_settings_with_io(
+                Settings {
+                    download: true,
+                    ..Settings::default()
+                },
+                |_| panic!("autostart is unchanged"),
+                |value| {
+                    second_saved_tx.send(()).unwrap();
+                    *second_disk.lock().unwrap() = value.clone();
+                    Ok(())
+                },
+            )
+        });
+        assert!(matches!(
+            second_saved_rx.recv_timeout(std::time::Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        release_tx.send(()).unwrap();
+        first.join().unwrap().unwrap();
+        second.join().unwrap().unwrap();
+        assert_eq!(
+            serde_json::to_value(&core.status().settings).unwrap(),
+            serde_json::to_value(&*persisted.lock().unwrap()).unwrap(),
+        );
+        assert!(core.status().settings.download);
+    }
+    #[test]
     fn input_needs_feature_pc_consent_and_fresh_session_activation() {
         let core = test_core();
         let id = Uuid::new_v4();
@@ -753,7 +966,10 @@ mod tests {
             core.execute_input(id, fresh, &Action::PointerMove { dx: 1, dy: 0 }),
             Err("unauthorized".into())
         );
-        assert_eq!(core.input_enable(id, fresh, true), Err("unauthorized".into()));
+        assert_eq!(
+            core.input_enable(id, fresh, true),
+            Err("unauthorized".into())
+        );
         let fresh = core.connect_authenticated(id, &token, true).unwrap();
         assert!(!core.input_active(id, fresh));
         core.input_enable(id, fresh, true).unwrap();

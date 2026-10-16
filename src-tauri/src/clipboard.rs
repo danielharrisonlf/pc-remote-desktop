@@ -119,7 +119,19 @@ pub fn read() -> Result<Option<String>, String> {
     }
 }
 
+#[cfg(test)]
 pub fn write(text: &str) -> Result<u32, String> {
+    write_checked(text, None)
+}
+
+fn check_write_sequence(expected: Option<u32>, actual: u32) -> Result<(), String> {
+    if expected.is_some_and(|sequence| sequence != actual) {
+        return Err("conflict".into());
+    }
+    Ok(())
+}
+
+pub fn write_checked(text: &str, expected_sequence: Option<u32>) -> Result<u32, String> {
     if text.as_bytes().len() > MAX_TEXT {
         return Err("too_large".into());
     }
@@ -129,6 +141,9 @@ pub fn write(text: &str) -> Result<u32, String> {
     let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
     open_retry(true)?;
     let _opened = Opened;
+    // OpenClipboard excludes other writers. Check here, before allocating or
+    // emptying, so a copy whose listener is still pending cannot be overwritten.
+    check_write_sequence(expected_sequence, sequence())?;
     unsafe {
         let global = GlobalAlloc(GMEM_MOVEABLE, wide.len() * 2).map_err(|e| e.to_string())?;
         let ptr = GlobalLock(global) as *mut u16;
@@ -186,6 +201,17 @@ pub fn start_listener(tx: Sender<u32>) {
 mod tests {
     use super::*;
     #[test]
+    fn automatic_write_rejects_a_copy_waiting_for_its_listener() {
+        assert_eq!(check_write_sequence(Some(41), 42), Err("conflict".into()));
+        assert_eq!(check_write_sequence(Some(41), 41), Ok(()));
+        assert_eq!(check_write_sequence(None, 42), Ok(()));
+        // Sequence values wrap; equality, rather than ordering, is required.
+        assert_eq!(
+            check_write_sequence(Some(u32::MAX), 0),
+            Err("conflict".into())
+        );
+    }
+    #[test]
     #[ignore = "modifica temporariamente o clipboard real do Windows"]
     fn windows_unicode_clipboard_smoke() {
         let original = match read() {
@@ -213,7 +239,14 @@ mod tests {
         }
         let _restore = Restore(original);
         let sample = "Olá 👋\nhttps://example.org\n漢字";
-        write(sample).unwrap();
+        let written_sequence = write(sample).unwrap();
+        assert_eq!(
+            write_checked(
+                "must not overwrite the current copy",
+                Some(written_sequence.wrapping_sub(1))
+            ),
+            Err("conflict".into())
+        );
         assert_eq!(read().unwrap().as_deref(), Some(sample));
     }
 }

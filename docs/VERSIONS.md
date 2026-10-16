@@ -4,7 +4,7 @@ Os lockfiles são a referência exata de todas as dependências transitivas. As 
 
 | Componente | Versão |
 |---|---|
-| Desktop / Android RN / Android Kotlin / protocolo | 0.2.1 / 0.2.0 / 0.2.3-kotlin / 1 + extensão opcional input.v1 |
+| Desktop / Android RN / Android Kotlin / protocolo | 0.2.2 / 0.2.1 / 0.2.4-kotlin / 1 + extensão opcional input.v1 |
 | Node / npm | 24.21.0 / 11.19.0 |
 | Android React Native / React | 0.87.1 / 19.2.3 |
 | React Native Community CLI | 20.2.0 |
@@ -25,3 +25,15 @@ Os lockfiles são a referência exata de todas as dependências transitivas. As 
 O Android utiliza New Architecture e Hermes, conforme o template oficial. A plataforma prioritária é Android e o template iOS não é versionado. Expo estável 57.0.28 acompanha RN 0.86; o Community CLI foi escolhido para utilizar RN estável atual 0.87.1. A build de release não depende do Expo Go ou Metro.
 
 Target Android 36: o acesso LAN usa INTERNET e NSD. Ao elevar target para 37, implementar ACCESS_LOCAL_NETWORK com solicitação contextual ou o seletor autorizado do sistema, conforme [documentação Android](https://developer.android.com/privacy-and-security/local-network-permission). Não usar serviço em primeiro plano como alternativa à restrição de clipboard.
+
+## Compatibilidade entre versões
+
+| Android | Desktop | Compatibilidade |
+|---|---|---|
+| Kotlin 0.2.4-kotlin / React Native 0.2.1 | 0.2.2 | Protocolo 1; input.v1 após consentimento nos dois aplicativos |
+| Kotlin 0.2.4-kotlin / React Native 0.2.1 | 0.2.0–0.2.1 | Mesmo contrato de volume, mídia, clipboard e input.v1 |
+| Kotlin 0.2.0–0.2.3-kotlin / React Native 0.2.0 | 0.2.x | Compatibilidade anterior preservada; input.v1 após consentimento |
+| Clientes Android 0.2.x | 0.1.x | Volume, mídia e clipboard; sem mouse/teclado |
+| Qualquer implementação | Sem protocolo 1 | Incompatível; rejeitado |
+
+A matriz descreve contrato; capacidades do dispositivo/player definem os controles reais. Não equivale a certificação de todos os players/hardwares.

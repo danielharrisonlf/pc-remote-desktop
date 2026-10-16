@@ -47,7 +47,16 @@ pub fn set_autostart(enabled: bool) -> Result<(), String> {
     } else {
         match key.remove_value("PC Remote") {
             Ok(()) => Ok(()),
-            Err(_) => Ok(()),
+            Err(error)
+                if error.code().0
+                    == windows::core::HRESULT::from_win32(
+                        windows::Win32::Foundation::ERROR_FILE_NOT_FOUND.0,
+                    )
+                    .0 =>
+            {
+                Ok(())
+            }
+            Err(error) => Err(error.to_string()),
         }
     }
 }

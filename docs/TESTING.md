@@ -2,6 +2,15 @@
 
 O código contém integrações nativas reais. Testes unitários não comprovam compatibilidade de cada player, permissões do Android nem continuidade durante suspensão. Este registro distingue execução automatizada, execução no Windows deste ambiente e validações pendentes em Android físico.
 
+## Atualização 0.2.2 — revisão de bugs, 15/10/2026
+
+- **28 testes Rust passaram**, com quatro smokes ignorados por padrão. O teste nativo de clipboard Windows passou separadamente; o conteúdo original foi restaurado, sem registrar seu texto.
+- **2 testes Vitest passaram** e TypeScript passou. As evidências específicas e os limites dos testes constam no relatório consolidado; os resultados históricos abaixo conservam suas versões originais.
+- Vite, Rust release e NSIS concluíram; instalador Windows x64 de 3.470.367 bytes gerado, sem Authenticode. A instalação pessoal em execução não foi substituída.
+- Celular físico, Wi-Fi real, players, suspensão física e assinaturas de produção continuam sujeitos às pendências abaixo.
+
+Consulte a [auditoria de segurança](SECURITY-AUDIT.md) e o [relatório de bugs e regressões de 15/10/2026](BUG-AUDIT-2026-10-15.md) para os achados, correções e evidências consolidadas.
+
 ## Atualização 0.2.1 — endereço LAN do convite, 15/10/2026
 
 - Reproduzido no Windows deste ambiente: a ordenação lexicográfica colocava o endereço de `vEthernet (Default Switch)` antes do IPv4 Wi-Fi que possui rota padrão. O QR usava esse primeiro endereço.
