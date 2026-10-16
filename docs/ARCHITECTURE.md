@@ -33,3 +33,11 @@ Futuras ações devem adicionar um tipo validado, autorização, capacidade anun
 - [Windows clipboard listener](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-addclipboardformatlistener)
 - [Windows clipboard exclusion formats](https://learn.microsoft.com/en-us/windows/win32/dataxchg/clipboard-formats)
 - [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+
+## Interface
+
+Os dois aplicativos usam os mesmos papéis de cor (fundo, superfície, borda, texto, acento índigo, sucesso, aviso, perigo) em tema claro, escuro ou do sistema. A impressão digital SHA-256 é mostrada em 16 blocos de 4 caracteres e numa faixa de 8 cores derivada por XOR dos 32 bytes; o mesmo algoritmo existe em `src/lib/fingerprint.ts` (Windows) e `src/domain/fingerprint.ts` (Android), com valores de teste idênticos.
+
+Windows: `App.tsx` só compõe o shell. `hooks/` concentra estado (`useStatus` com polling encadeado sem sobreposição e último estado preservado em falhas, `useSettings` com alterações serializadas, `useTheme`, `useUpdater`, `useToasts`), `components/` os blocos visuais (barra lateral retrátil, cabeçalho com status, gaveta de pareamento com aprovação inline, diálogos nativos `<dialog>`, toasts em top layer) e `views/` as páginas Visão geral, Dispositivos, Transferência, Diagnóstico e Configurações. O backend expõe também horário do último contato por dispositivo, horário dos pedidos de pareamento, eventos com data e o histórico de transferências apenas com metadados, tudo em RAM.
+
+Android: `AppShell.tsx` monta a barra de navegação Material 3 com quatro destinos (Touchpad, Mídia, Transferir, Conexão). O touchpad ocupa a tela sem ScrollView e mantém o responder até soltar; movimento usa `InputMotion` e rolagem usa `ScrollMotion`, ambos com um pedido em voo. A descoberta mDNS tem um único dono com contagem de referências (`communication/discovery.ts`) e fica ativa enquanto um PC salvo está desconectado, para a reconexão automática do módulo nativo. Ícones são SVG com a geometria Lucide, a mesma do Windows.

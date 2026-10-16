@@ -72,13 +72,21 @@ Veja [testes e pendências](docs/TESTING.md) antes de considerar a build validad
 
 ## Touchpad e teclado remoto
 
-1. No Windows, abra **Preferências → Mouse e teclado** e habilite **Permitir mouse e teclado pelo celular**. A opção começa desligada.
-2. No Android, abra **Touchpad e teclado** e toque em **Ativar controle** nesta conexão.
-3. Arraste no touchpad para mover o cursor; toque para clicar. Botões separados oferecem clique direito, clique duplo e rolagem. Digite no campo de texto e envie explicitamente, ou use as teclas comuns.
+1. No Windows, abra **Transferência** (ou **Controles rápidos** na Visão geral) e ligue **Permitir mouse e teclado pelo celular**. A opção começa desligada.
+2. No Android, abra a aba **Touchpad** e toque em **Ativar touchpad** nesta conexão.
+3. Um dedo move o cursor e um toque clica. Dois dedos rolam a página e um toque com dois dedos é o clique direito. A faixa à direita do touchpad rola como uma barra de rolagem. Os botões de clique ficam na base da tela, junto das teclas Esc, Tab, Enter, Espaço, setas, Apagar e duplo clique. O botão de teclado abre um campo com prévia para revisar o texto antes de enviar.
 4. O alvo é o aplicativo em foco no Windows. Selecione a janela desejada antes de enviar texto. O controle não exibe a tela do PC.
-5. Para interromper, desative no celular, na Visão geral do Windows ou no menu da bandeja. Bloquear a permissão no PC também interrompe o controle.
+5. Para interromper, toque em **Desligar** no celular, use **Interromper agora** em Transferência ou na Visão geral do Windows, ou o menu da bandeja. Bloquear a permissão no PC também interrompe o controle.
 
 A ativação é descartada ao desconectar, suspender ou colocar o Android em segundo plano. É necessário ativar novamente; movimentos, cliques e textos pendentes não são repetidos. Texto digitado fica somente em RAM e não entra em logs/histórico. O limite por envio é **1.024 bytes UTF-8**, sem caracteres de controle; use os botões Enter e Tab para essas teclas. Aplicativos elevados, tela de bloqueio/UAC e algumas interfaces podem recusar entrada. Teclas físicas pressionadas no PC podem interferir. Veja [INPUT.md](docs/INPUT.md) para detalhes e validações.
+
+## Atualizações
+
+O Windows consulta `releases/latest` de `pc-remote-desktop` ao abrir e no intervalo escolhido em **Configurações → Atualizações** (1 h, 6 h, 24 h ou manual; padrão 6 h). O resultado fica em cache para respeitar o limite de 60 consultas/h da API pública. Com versão nova, aparece **Versão X disponível** no cabeçalho; o diálogo mostra as notas e abre o instalador no navegador. Nada é instalado sem confirmação, e só URLs de releases deste projeto podem ser abertas pelo comando `open_url`.
+
+O Android consulta `pc-remote-android` ao abrir e a cada 6 horas em primeiro plano, ignora tags `-kotlin` e escolhe o APK da arquitetura do aparelho (ARM64 ou x86_64 no emulador). O banner **Ver novidades** abre as notas e o download do APK no navegador.
+
+Enquanto o repositório for privado, a API pública responde 404: a verificação automática fica silenciosa e a manual explica o motivo. Publique as releases (ou torne o repositório público) para o aviso funcionar.
 
 ## Integração contínua
 
