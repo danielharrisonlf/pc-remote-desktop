@@ -4,7 +4,7 @@ Os lockfiles são a referência exata de todas as dependências transitivas. As 
 
 | Componente | Versão |
 |---|---|
-| Desktop / Android / protocolo | 0.5.0 / 0.4.0-kotlin / 1 + extensões opcionais input.v1 e files.v1 |
+| Desktop / Android / protocolo | 0.6.0 / 0.6.0-kotlin / 1 + extensões opcionais input.v1, files.v1, files.v2, search.v1 e info.v1 |
 | Node / npm | 24.21.0 / 11.19.0 |
 | Rust / MSVC / Windows SDK de build | 1.97.1 / 19.44 / 10.0.26100.0 |
 | Tauri Rust / CLI / API JS | 2.12.3 / 2.12.2 / 2.12.3 |
@@ -29,6 +29,9 @@ Target Android 36: o acesso LAN usa INTERNET e NSD. Ao elevar target para 37, im
 
 | Android | Desktop | Compatibilidade |
 |---|---|---|
+| 0.6.0-kotlin | 0.6.0 | Protocolo 1 + input.v1, files.v1, files.v2, search.v1 e info.v1: arquivos de qualquer tipo até 1 GB nos dois sentidos, touchpad e clipboard prontos após o pareamento, pesquisa no YouTube e nome do Windows |
+| 0.6.0-kotlin | 0.4.0 e 0.5.0 | O PC ignora files.v2, search.v1 e info.v1: PNG/JPG/PDF até 50 MB só do celular para o PC, sem pesquisa; touchpad pede **Ativar touchpad** e o PC ainda pede as chaves de mouse/teclado, arquivos e direções do clipboard |
+| 0.4.0 e 0.5.0-kotlin | 0.6.0 | Formato anterior; arquivos e mouse/teclado já liberados no PC; o clipboard sincroniza nas direções ligadas no celular |
 | 0.4.0-kotlin | 0.5.0 e 0.4.0 | Protocolo 1; input.v1 após consentimento nos dois aplicativos; files.v1 com **Receber imagens e PDFs do celular** ligado no PC. A 0.5.0 só acrescenta a atualização pelo app no Windows, sem mudança de protocolo |
 | 0.4.0-kotlin | 0.2.x e 0.3.0 | input.v1, volume (também pelas teclas físicas), mídia e clipboard; Arquivos pede para atualizar o PC e nenhum pedido de arquivo é enviado |
 | 0.2.0–0.3.0-kotlin | 0.4.0 e 0.5.0 | Contrato anterior preservado; o PC não anuncia `file.transfer` nem envia o estado `files` |

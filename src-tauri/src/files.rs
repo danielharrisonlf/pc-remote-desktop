@@ -1,11 +1,12 @@
-//! Receives PNG, JPEG and PDF files from the paired phone (files.v1).
+//! Receives files from the paired phone: PNG, JPEG and PDF up to 50 MB with
+//! files.v1, any type up to 1 GiB with files.v2.
 //!
 //! The control session issues a short single-use ticket. Bytes arrive on the
 //! separate `/v1/files` socket and are written to a part file that is renamed,
-//! never overwriting, only after size, SHA-256 and content signature match.
+//! never overwriting, only after size, SHA-256 and (files.v1) content signature match.
 use crate::{
-    core::{constant_time_eq, now_ms, Core, Runtime},
-    protocol::MAX_FILE_BYTES,
+    core::{constant_time_eq, now_ms, Core, Runtime, TransferDirection},
+    protocol::{MAX_FILE_BYTES, MAX_FILE_BYTES_V2},
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -42,11 +43,27 @@ const PART_SUFFIX: &str = ".pcremote-part";
 const SIGNATURE_WINDOW: usize = 1024;
 const MARK_OF_THE_WEB: &[u8] = b"[ZoneTransfer]\r\nZoneId=3\r\n";
 
+/// Extensions Explorer acts on just by listing the folder (icons, shell links),
+/// refused even though files.v2 accepts any type. `desktop.ini` is checked by name.
+const SHELL_ACTIVE: [&str; 8] = [
+    "lnk",
+    "url",
+    "scf",
+    "library-ms",
+    "searchconnector-ms",
+    "settingcontent-ms",
+    "appref-ms",
+    "website",
+];
+const MAX_MIME_BYTES: usize = 127;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileKind {
     Png,
     Jpeg,
     Pdf,
+    /// files.v2: the content is not checked.
+    Any,
 }
 
 impl FileKind {
@@ -58,8 +75,56 @@ impl FileKind {
             Self::Pdf => head[..head.len().min(SIGNATURE_WINDOW)]
                 .windows(5)
                 .any(|window| window == b"%PDF-"),
+            Self::Any => true,
         }
     }
+}
+
+/// `type/subtype` in lowercase, at most 127 bytes, RFC 6838 restricted-name characters.
+pub fn valid_mime(mime: &str) -> bool {
+    let part = |value: &str| {
+        !value.is_empty()
+            && value
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"!#$&^_.+-".contains(&b))
+    };
+    mime.len() <= MAX_MIME_BYTES
+        && mime
+            .split_once('/')
+            .is_some_and(|(kind, subtype)| part(kind) && part(subtype))
+}
+
+/// MIME announced for a file the PC sends, from its extension.
+pub fn mime_for(name: &SafeName) -> &'static str {
+    match name.ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "heic" => "image/heic",
+        "pdf" => "application/pdf",
+        "txt" => "text/plain",
+        "csv" => "text/csv",
+        "zip" => "application/zip",
+        "mp4" => "video/mp4",
+        "mkv" => "video/x-matroska",
+        "mov" => "video/quicktime",
+        "webm" => "video/webm",
+        "mp3" => "audio/mpeg",
+        "m4a" => "audio/mp4",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "apk" => "application/vnd.android.package-archive",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        _ => "application/octet-stream",
+    }
+}
+
+fn shell_active(name: &SafeName) -> bool {
+    SHELL_ACTIVE.contains(&name.ext.as_str())
+        || name.file_name().eq_ignore_ascii_case("desktop.ini")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,6 +140,17 @@ impl SafeName {
         } else {
             format!("{}.{}", self.stem, self.ext)
         }
+    }
+    /// Shortens the stem (then the extension) until the whole name fits `max` UTF-8
+    /// bytes, as `file.push` requires; Windows names may be longer than 255 bytes.
+    pub fn fit(mut self, max: usize) -> Self {
+        while self.file_name().len() > max && self.stem.chars().count() > 1 {
+            self.stem.pop();
+        }
+        while self.file_name().len() > max && !self.ext.is_empty() {
+            self.ext.pop();
+        }
+        self
     }
     /// `name.ext`, `name (1).ext` … `name (99).ext`, then `name <8 id chars>.ext`.
     fn candidates(&self, transfer_id: Uuid) -> impl Iterator<Item = String> + '_ {
@@ -174,25 +250,58 @@ pub fn classify(name: &str, mime: &str) -> Result<(SafeName, FileKind), &'static
     Ok((safe, kind))
 }
 
-/// Field rules of `file.offer`, in the order of the contract.
+fn offer_fields_valid(transfer_id: Uuid, name: &str, size: u64) -> bool {
+    !transfer_id.is_nil()
+        && !name.is_empty()
+        && name.len() <= 255
+        && !name.chars().any(char::is_control)
+        && size > 0
+}
+
+/// Field rules of a files.v1 `file.offer`, in the order of the contract.
 pub fn check_offer(
     transfer_id: Uuid,
     name: &str,
     size: u64,
     mime: &str,
 ) -> Result<(SafeName, FileKind), &'static str> {
-    if transfer_id.is_nil()
-        || name.is_empty()
-        || name.len() > 255
-        || name.chars().any(char::is_control)
-        || size == 0
-    {
+    if !offer_fields_valid(transfer_id, name, size) {
         return Err("invalid_message");
     }
     if size > MAX_FILE_BYTES {
         return Err("too_large");
     }
     classify(name, mime)
+}
+
+/// files.v2 `file.offer`: any type up to 1 GiB; MIME is informative but must be well formed.
+pub fn check_offer_v2(
+    transfer_id: Uuid,
+    name: &str,
+    size: u64,
+    mime: &str,
+) -> Result<(SafeName, FileKind), &'static str> {
+    if !offer_fields_valid(transfer_id, name, size) || !valid_mime(mime) {
+        return Err("invalid_message");
+    }
+    if size > MAX_FILE_BYTES_V2 {
+        return Err("too_large");
+    }
+    let safe = sanitize_name(name);
+    if shell_active(&safe) {
+        return Err("file_type");
+    }
+    Ok((safe, FileKind::Any))
+}
+
+/// Wall-clock budget of one transfer: 15 min, or 1 s per 256 KiB for large files.
+pub fn total_timeout(size: u64, files_v2: bool) -> Duration {
+    let base = Duration::from_secs(15 * 60);
+    if files_v2 {
+        base.max(Duration::from_secs(size.div_ceil(256 * 1024)))
+    } else {
+        base
+    }
 }
 
 pub fn is_sha256_hex(value: &str) -> bool {
@@ -244,10 +353,11 @@ pub struct Accepted {
 
 /// Panel metadata only; the file content is never kept in memory or logs.
 #[derive(Clone, Serialize)]
-pub struct ReceivedFile {
+pub struct FileEntry {
     pub at: u64,
     pub name: String,
     pub bytes: u64,
+    pub direction: TransferDirection,
 }
 
 #[derive(Clone, Serialize)]
@@ -264,9 +374,23 @@ impl Runtime {
             active.abort.notify_one();
         }
     }
+    /// The session ended: nothing in flight survives, but the PC's outgoing queue waits.
     pub(crate) fn end_file_session(&mut self) {
         self.files_feature = false;
+        self.files_v2 = false;
         self.abort_file();
+        self.abort_outgoing("A conexão com o celular terminou.");
+    }
+    pub(crate) fn record_file(&mut self, name: &str, bytes: u64, direction: TransferDirection) {
+        if self.file_history.len() == MAX_RECEIVED {
+            self.file_history.pop_front();
+        }
+        self.file_history.push_back(FileEntry {
+            at: now_ms(),
+            name: name.to_string(),
+            bytes,
+            direction,
+        });
     }
     pub(crate) fn incoming_file(&self) -> Option<IncomingFile> {
         match &self.file_slot {
@@ -278,11 +402,11 @@ impl Runtime {
             _ => None,
         }
     }
-    fn files_gate(&self, device: Uuid, epoch: u64, offer: bool) -> Result<(), &'static str> {
+    fn files_gate(&self, device: Uuid, epoch: u64) -> Result<(), &'static str> {
         if !self.session_ok(device, epoch) {
             return Err("unauthorized");
         }
-        if !self.files_feature || (offer && !self.settings.allow_files) {
+        if !self.files_feature {
             return Err("unavailable");
         }
         Ok(())
@@ -296,9 +420,15 @@ impl Runtime {
 }
 
 impl Core {
-    /// Negotiation and permission checks that precede field validation.
-    pub fn file_gate(&self, device: Uuid, epoch: u64, offer: bool) -> Result<(), &'static str> {
-        self.state.lock().unwrap().files_gate(device, epoch, offer)
+    /// Session and negotiation checks that precede field validation.
+    pub fn file_gate(&self, device: Uuid, epoch: u64) -> Result<(), &'static str> {
+        self.state.lock().unwrap().files_gate(device, epoch)
+    }
+
+    /// Whether this session negotiated files.v2.
+    pub fn files_v2(&self, device: Uuid, epoch: u64) -> bool {
+        let s = self.state.lock().unwrap();
+        s.session_ok(device, epoch) && s.files_v2
     }
 
     /// Validates an offer and issues a ticket. Performs folder I/O; call from a blocking thread.
@@ -313,8 +443,12 @@ impl Core {
     ) -> Result<String, &'static str> {
         let (safe, kind) = {
             let mut s = self.state.lock().unwrap();
-            s.files_gate(device, epoch, true)?;
-            let checked = check_offer(transfer_id, name, size, mime)?;
+            s.files_gate(device, epoch)?;
+            let checked = if s.files_v2 {
+                check_offer_v2(transfer_id, name, size, mime)?
+            } else {
+                check_offer(transfer_id, name, size, mime)?
+            };
             if s.file_busy() {
                 return Err("file_busy");
             }
@@ -334,7 +468,7 @@ impl Core {
         let mut secret = [0u8; 32];
         rand::RngCore::fill_bytes(&mut rand::rng(), &mut secret);
         let mut s = self.state.lock().unwrap();
-        s.files_gate(device, epoch, true)?;
+        s.files_gate(device, epoch)?;
         if s.file_busy() {
             return Err("file_busy");
         }
@@ -389,7 +523,7 @@ impl Core {
         if !s.session_ok(ticket.device, ticket.epoch) {
             return Err("unauthorized");
         }
-        if !s.files_feature || !s.settings.allow_files {
+        if !s.files_feature {
             return Err("unavailable");
         }
         let abort = Arc::new(Notify::new());
@@ -418,7 +552,7 @@ impl Core {
     /// `cancelled` means the phone dropped this transfer through `file.cancel`.
     pub fn file_check(&self, accepted: &Accepted, received: u64) -> Result<(), &'static str> {
         let mut s = self.state.lock().unwrap();
-        s.files_gate(accepted.device, accepted.epoch, true)?;
+        s.files_gate(accepted.device, accepted.epoch)?;
         match &mut s.file_slot {
             Some(Slot::Active(active)) if Arc::ptr_eq(&active.abort, &accepted.abort) => {
                 active.received = received;
@@ -442,14 +576,7 @@ impl Core {
             if matches!(&s.file_slot, Some(Slot::Active(a)) if Arc::ptr_eq(&a.abort, token)) {
                 s.file_slot = None;
             }
-            if s.received_files.len() == MAX_RECEIVED {
-                s.received_files.pop_front();
-            }
-            s.received_files.push_back(ReceivedFile {
-                at: now_ms(),
-                name: name.to_string(),
-                bytes,
-            });
+            s.record_file(name, bytes, TransferDirection::ToPc);
         }
         if let Some(notify) = self.notifier.get() {
             notify(
@@ -569,6 +696,42 @@ pub fn write_part(file: File, mut chunks: mpsc::Receiver<Bytes>) -> io::Result<W
     })
 }
 
+/// Blocking reader for PC → phone: sends exactly `size` bytes in 64 KiB chunks and
+/// returns their SHA-256. A file that shrank or grew since it was queued is an error.
+pub fn read_for_send(
+    path: &Path,
+    size: u64,
+    chunks: mpsc::Sender<Bytes>,
+) -> Result<[u8; 32], String> {
+    use std::io::Read;
+    let mut file = File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut left = size;
+    while left > 0 {
+        let mut buffer = vec![0u8; left.min(crate::protocol::FILE_CHUNK_BYTES as u64) as usize];
+        let mut filled = 0;
+        while filled < buffer.len() {
+            match file.read(&mut buffer[filled..]) {
+                Ok(0) => return Err("o arquivo ficou menor".into()),
+                Ok(n) => filled += n,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        hasher.update(&buffer);
+        left -= buffer.len() as u64;
+        // The socket side stopped: cancelled, failed or closed.
+        chunks
+            .blocking_send(Bytes::from(buffer))
+            .map_err(|_| "envio interrompido".to_string())?;
+    }
+    let mut probe = [0u8; 1];
+    if file.read(&mut probe).map_err(|e| e.to_string())? != 0 {
+        return Err("o arquivo ficou maior".into());
+    }
+    Ok(hasher.finalize().into())
+}
+
 fn mark_of_the_web(path: &Path) -> io::Result<()> {
     let mut stream = path.as_os_str().to_owned();
     stream.push(":Zone.Identifier");
@@ -620,7 +783,10 @@ pub fn move_unique(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::secrets::{self, Device, Secrets};
+    use crate::{
+        protocol::Features,
+        secrets::{self, Device, Secrets},
+    };
 
     pub(crate) fn temp_folder(label: &str) -> PathBuf {
         let folder = std::env::temp_dir().join(format!("pc-remote-{label}-{}", Uuid::new_v4()));
@@ -870,9 +1036,8 @@ pub(crate) mod tests {
             name: "Files test".into(),
             token_hash: secrets::token_hash(&token),
         });
-        core.state.lock().unwrap().settings.allow_files = true;
         let epoch = core
-            .connect_authenticated(id, &token, false, files)
+            .connect_authenticated(id, &token, Features::legacy(false, files))
             .unwrap();
         (core, id, token, epoch)
     }
@@ -896,10 +1061,9 @@ pub(crate) mod tests {
     fn tickets_require_negotiation_permission_and_a_free_slot() {
         let (core, id, token, epoch) = session_core(false);
         assert_eq!(offer(&core, id, epoch, Uuid::new_v4()), Err("unavailable"));
-        let epoch = core.connect_authenticated(id, &token, false, true).unwrap();
-        core.state.lock().unwrap().settings.allow_files = false;
-        assert_eq!(offer(&core, id, epoch, Uuid::new_v4()), Err("unavailable"));
-        core.state.lock().unwrap().settings.allow_files = true;
+        let epoch = core
+            .connect_authenticated(id, &token, Features::legacy(false, true))
+            .unwrap();
         assert_eq!(
             offer(&core, id, epoch + 1, Uuid::new_v4()),
             Err("unauthorized")
@@ -977,7 +1141,9 @@ pub(crate) mod tests {
         );
 
         // A reconnection changes the epoch and invalidates the ticket.
-        let epoch = core.connect_authenticated(id, &token, false, true).unwrap();
+        let epoch = core
+            .connect_authenticated(id, &token, Features::legacy(false, true))
+            .unwrap();
         assert_eq!(
             core.file_begin(next, &next_ticket).err(),
             Some("unauthorized")
@@ -1011,22 +1177,23 @@ pub(crate) mod tests {
         core.file_release(&reused.abort);
         assert!(core.status().incoming_file.is_none());
 
+        // Changing the sync preference never touches a file in flight.
         let transfer = Uuid::new_v4();
         let ticket = offer(&core, id, epoch, transfer).unwrap();
         let accepted = core.file_begin(transfer, &ticket).unwrap();
         let mut settings = core.status().settings;
-        settings.allow_files = false;
+        settings.realtime = false;
         core.update_settings_with_io(settings, |_| Ok(()), |_| Ok(()))
             .unwrap();
-        assert_eq!(core.file_check(&accepted, 1), Err("unavailable"));
-        assert!(core.status().incoming_file.is_none());
-        assert!(core.snapshot().files.is_some_and(|files| !files.allowed));
+        core.file_check(&accepted, 1).unwrap();
+        assert!(core.snapshot().files.is_some_and(|files| files.allowed));
+        core.file_release(&accepted.abort);
 
-        core.state.lock().unwrap().settings.allow_files = true;
         let transfer = Uuid::new_v4();
         let ticket = offer(&core, id, epoch, transfer).unwrap();
         let accepted = core.file_begin(transfer, &ticket).unwrap();
-        core.connect_authenticated(id, &token, false, true).unwrap();
+        core.connect_authenticated(id, &token, Features::legacy(false, true))
+            .unwrap();
         assert_eq!(core.file_check(&accepted, 1), Err("unauthorized"));
         assert!(core.status().incoming_file.is_none());
         cleanup(&core);
@@ -1046,15 +1213,187 @@ pub(crate) mod tests {
             core.file_completed(&Arc::new(Notify::new()), &format!("foto {index}.png"), 42);
         }
         let status = core.status();
-        assert_eq!(status.received_files.len(), MAX_RECEIVED);
+        assert_eq!(status.file_history.len(), MAX_RECEIVED);
         assert_eq!(
-            status.received_files[0].name,
+            status.file_history[0].name,
             format!("foto {}.png", MAX_RECEIVED + 1)
         );
+        assert_eq!(status.file_history[0].direction, TransferDirection::ToPc);
         let shown = shown.lock().unwrap();
         assert_eq!(shown.len(), MAX_RECEIVED + 2);
         assert_eq!(shown[0].0, "Arquivo recebido do celular");
         assert_eq!(shown[0].1, "foto 0.png foi salvo em Downloads\\PC Remote.");
+        cleanup(&core);
+    }
+
+    #[test]
+    fn v2_offers_take_any_type_up_to_one_gigabyte_except_shell_active_files() {
+        let id = Uuid::new_v4();
+        for (file, mime) in [
+            ("filme.mkv", "video/x-matroska"),
+            ("setup.exe", "application/octet-stream"),
+            ("sem extensão", "application/octet-stream"),
+            ("foto.png", "image/jpeg"),
+            (
+                "planilha.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+        ] {
+            let (safe, kind) = check_offer_v2(id, file, MAX_FILE_BYTES_V2, mime).unwrap();
+            assert_eq!(kind, FileKind::Any);
+            assert_eq!(safe.file_name(), sanitize_name(file).file_name());
+        }
+        assert_eq!(
+            check_offer_v2(id, "a.mkv", MAX_FILE_BYTES_V2 + 1, "video/x-matroska").err(),
+            Some("too_large")
+        );
+        for name in [
+            "atalho.lnk",
+            "SITE.URL",
+            "x.scf",
+            "pasta.library-ms",
+            "busca.searchConnector-ms",
+            "a.settingcontent-ms",
+            "app.appref-ms",
+            "b.website",
+            "desktop.ini",
+            "Desktop.INI",
+            "..\\desktop.ini",
+        ] {
+            assert_eq!(
+                check_offer_v2(id, name, 10, "application/octet-stream").err(),
+                Some("file_type"),
+                "{name}"
+            );
+        }
+        for mime in [
+            "",
+            "video",
+            "video/",
+            "/mp4",
+            "Video/MP4",
+            "video/mp4; x=1",
+            "a/b/c",
+            "vídeo/mp4",
+        ] {
+            assert_eq!(
+                check_offer_v2(id, "a.mp4", 10, mime).err(),
+                Some("invalid_message"),
+                "{mime}"
+            );
+        }
+        assert!(!valid_mime(&format!("a/{}", "b".repeat(126))));
+        assert!(valid_mime(&format!("a/{}", "b".repeat(125))));
+        for (field, size) in [("", 1), ("a\n.mp4", 1), ("a.mp4", 0)] {
+            assert_eq!(
+                check_offer_v2(id, field, size, "video/mp4").err(),
+                Some("invalid_message")
+            );
+        }
+        assert_eq!(
+            check_offer_v2(Uuid::nil(), "a.mp4", 1, "video/mp4").err(),
+            Some("invalid_message")
+        );
+        // files.v1 stays exactly as before.
+        assert_eq!(
+            check_offer(id, "filme.mkv", 10, "video/x-matroska").err(),
+            Some("file_type")
+        );
+        assert_eq!(
+            check_offer(id, "a.png", MAX_FILE_BYTES + 1, "image/png").err(),
+            Some("too_large")
+        );
+    }
+
+    #[test]
+    fn pushed_names_fit_255_bytes_on_character_boundaries() {
+        let long = sanitize_name(&format!("{}.pdf", "漢".repeat(100)));
+        assert_eq!(long.file_name().len(), 304);
+        let fitted = long.fit(255);
+        assert!(fitted.file_name().len() <= 255);
+        assert_eq!(fitted.ext, "pdf");
+        assert!(fitted.stem.chars().all(|c| c == '漢'));
+        let ext = SafeName {
+            stem: "a".into(),
+            ext: "é".repeat(200),
+        }
+        .fit(255);
+        assert!(ext.file_name().len() <= 255 && ext.stem == "a");
+        assert_eq!(sanitize_name("curto.txt").fit(255).file_name(), "curto.txt");
+    }
+
+    #[test]
+    fn announced_mime_types_are_well_formed_and_large_files_get_more_time() {
+        for ext in [
+            "png", "jpg", "pdf", "mp4", "mkv", "docx", "xlsx", "pptx", "apk", "zip", "x", "",
+        ] {
+            let name = SafeName {
+                stem: "a".into(),
+                ext: ext.into(),
+            };
+            assert!(valid_mime(mime_for(&name)), "{ext}");
+        }
+        assert_eq!(
+            total_timeout(MAX_FILE_BYTES, false),
+            Duration::from_secs(900)
+        );
+        assert_eq!(
+            total_timeout(MAX_FILE_BYTES_V2, false),
+            Duration::from_secs(900)
+        );
+        assert_eq!(total_timeout(10, true), Duration::from_secs(900));
+        assert_eq!(
+            total_timeout(MAX_FILE_BYTES_V2, true),
+            Duration::from_secs(4096)
+        );
+    }
+
+    #[test]
+    fn v2_sessions_receive_any_type_and_v1_sessions_keep_the_old_rules() {
+        let (core, id, token, epoch) = session_core(true);
+        assert_eq!(
+            core.file_offer(
+                id,
+                epoch,
+                Uuid::new_v4(),
+                "filme.mkv",
+                10,
+                "video/x-matroska"
+            ),
+            Err("file_type")
+        );
+        let features = Features {
+            files: true,
+            files_v2: true,
+            ..Features::default()
+        };
+        let epoch = core.connect_authenticated(id, &token, features).unwrap();
+        let transfer = Uuid::new_v4();
+        let ticket = core
+            .file_offer(
+                id,
+                epoch,
+                transfer,
+                "filme.mkv",
+                MAX_FILE_BYTES + 1,
+                "video/x-matroska",
+            )
+            .unwrap();
+        let accepted = core.file_begin(transfer, &ticket).unwrap();
+        assert_eq!(accepted.kind, FileKind::Any);
+        assert_eq!(accepted.name.file_name(), "filme.mkv");
+        core.file_release(&accepted.abort);
+        assert_eq!(
+            core.file_offer(
+                id,
+                epoch,
+                Uuid::new_v4(),
+                "a.lnk",
+                10,
+                "application/octet-stream"
+            ),
+            Err("file_type")
+        );
         cleanup(&core);
     }
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { LoaderCircle, RefreshCw, ServerOff } from 'lucide-react';
 import { Button } from './components/Button';
 import { EmptyState } from './components/EmptyState';
@@ -71,6 +72,25 @@ function Shell() {
     }
   }, [status, pairingOpen, page, toast]);
 
+  // Files dropped on the window are queued in Rust; only the refusals come back here.
+  useEffect(() => {
+    let active = true;
+    let stop: (() => void) | undefined;
+    listen<string[]>('outgoing-problems', event => {
+      event.payload.forEach(problem => toast.error(problem));
+      void refresh();
+    })
+      .then(unlisten => {
+        if (active) stop = unlisten;
+        else unlisten();
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      stop?.();
+    };
+  }, [refresh, toast]);
+
   const navigate = useCallback((next: Page) => {
     setPage(next);
     mainRef.current?.scrollTo({ top: 0 });
@@ -105,8 +125,6 @@ function Shell() {
           serviceState={serviceState}
           serviceDetail={lastError}
           onRetry={() => void refresh()}
-          theme={theme.resolved}
-          onToggleTheme={theme.toggle}
           onOpenSettings={() => navigate('settings')}
           update={updateNotice(updater.state)}
           onOpenUpdate={() => setUpdateOpen(true)}

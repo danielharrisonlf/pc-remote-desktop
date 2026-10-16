@@ -2,6 +2,43 @@
 
 O código contém integrações nativas reais. Testes unitários não comprovam compatibilidade de cada player, permissões do Android nem continuidade durante suspensão. Este registro distingue execução automatizada, execução no Windows deste ambiente e validações pendentes em Android físico.
 
+## Atualização 0.6.0 — menos chaves, arquivos de até 1 GB nos dois sentidos, mídia e pesquisa, 16/10/2026
+
+### Testes automatizados
+
+- `cargo fmt --check`, `cargo test --target x86_64-pc-windows-msvc`: **77 testes da biblioteca e 5 do atualizador passaram** (5 nativos ignorados por mexerem no estado real do Windows, inclusive o novo `windows_gsmtc_session_ids_are_stable_across_reads`). `npx tsc --noEmit` sem erros e **36 testes Vitest**.
+- Novos: preferências antigas viram os padrões 0.6 e o `settings.json` continua legível pela 0.5 (`settings.rs`); regras de files.v2 (qualquer tipo até 1 GiB, extensões que o Explorador executa recusadas, MIME, tempo total proporcional, nomes ≤ 255 bytes); fila PC → celular (ticket de uso único ligado ao epoch, expiração, cancelamento pelo painel e pelo celular, recusa por espaço); bloqueio de mouse e teclado só por Interromper/Liberar, inclusive com gravação falhando e com o painel enviando configurações antigas; pesquisa com origem fixa e consulta codificada; nome do Windows; exemplos `negotiated06` do contrato.
+- Integração com TLS real: upload de 60 MB de um `.mkv` (fora do limite e do tipo da files.v1) dentro da janela de 1 MiB, com SHA-256 e `Zone.Identifier`; push PC → celular de 3 MB conferindo a janela, `file.end`, `file.done`, cancelamento no PC com "Envio cancelado no PC." e reuso de ticket recusado.
+
+### Ponta a ponta: PC real + emulador
+
+Windows 11 Pro (build 26300) com o executável release desta branch (`tauri build --no-bundle`) e o AVD PCRemote_API33 (Android 13, Google APIs x86_64) com o APK debug e, no fim, o APK release (R8) instalado por cima, com a mesma chave. Pareamento por convite entregue pelo adb ao `DebugInviteReceiver`, que só existe na build debug (`src/debug`): o emulador não lê o QR do PC nem enxerga o mDNS. O código e a aprovação no PC continuam obrigatórios. **A ponte de clipboard do emulador foi desligada** (`HKCU\Software\Android Open Source Project\Emulator\set\clipboardSharing = false`, lido ao iniciar o emulador): ligada, ela copia texto entre Windows e Android sozinha, invalida os testes de clipboard e chegou a deixar o clipboard do Windows vazio. Evidências em `artifacts/qa/0.6-e2e/` (fora dos repositórios).
+
+| Cenário | Resultado |
+|---|---|
+| Parear | Aprovado no PC; o celular abriu no Touchpad já armado, sem tocar em "Ativar touchpad" nem ligar nada no PC. Um arrasto no touchpad moveu o cursor do Windows (+376, +127; posição restaurada) |
+| Seção Conexão | Só nome do PC, "Conectado", "Windows 11 Pro" (info.v1) e Desconectar / Outro PC / Remover este PC. Sem latência, IP, endereço salvo ou identidade |
+| Clipboard PC → celular | Texto Unicode ("– ação ✓") chegou em "Texto do PC" e na área de transferência do celular (colado num campo) |
+| Clipboard celular → PC | Cópia no app foi para o Windows na hora |
+| Copiado em outro app (Contatos) | Nada enviado com o app em segundo plano; enviado uma vez ao voltar, sem eco |
+| PC → celular com o app em segundo plano | Texto disponível para colar no app Contatos (gravação permitida em segundo plano) |
+| Sincronização em tempo real desligada | Chip "Manual"; cópia no PC não chegou e cópia no celular não saiu; "Enviar texto" funcionou e "Buscar do PC" copiou direto no celular |
+| 1 GiB PC → celular | Seletor nativo "Enviar arquivos ao celular"; 1.073.741.824 bytes em `Download/PC Remote`, SHA-256 igual ao original, cerca de 2 min 50 s pelo NAT do emulador; serviço em primeiro plano `dataSync` ativo durante o envio; PC com 84 MB de memória de trabalho e celular com 9 MB de heap Java depois do envio |
+| 1 GiB celular → PC | Escolhido no seletor do Android; SHA-256 igual, `Zone.Identifier` ZoneId=3, nenhuma `.pcremote-part` restante, cerca de 3 min |
+| Push com o APK release | `Relatório teste 0.6.mp4` (5 MB) com nome Unicode preservado e SHA-256 igual |
+| Interromper (PC) | Celular mostrou "Bloqueado no PC" na hora, sem cair a conexão; o bloqueio continuou depois de encerrar e reabrir o app; `settings.json` com `inputBlocked:true` e `allowInput:false` para versões antigas |
+| Liberar (PC) | Celular voltou a armar o touchpad sozinho |
+| Mídia | Ver [MEDIA-COMPATIBILITY.md](MEDIA-COMPATIBILITY.md): Reprodutor Multimídia com play/pause, anterior/próxima e ±10 s pelo celular, estado do botão coerente; YouTube no Chrome detectado com os controles certos e como primeira sessão; Spotify não instalado |
+| Pesquisa (search.v1) | Texto digitado no celular abriu `youtube.com/results?search_query=lofi+hip+hop+radio` no Chrome do PC |
+| Voz | Permissão do microfone pedida só no primeiro toque; recusar mostra "Sem o microfone, digite a pesquisa."; permitir abre o painel "Ouvindo… / Pode falar." com o indicador de microfone do Android. Achado e corrigido: o reconhecedor do emulador (sem pacote offline pt-BR) parava de gravar sem nunca responder e o painel ficava preso; agora o app desiste após 8 s sem fala (20 s no total) e mostra "Não entendi. Toque no microfone e tente de novo." Reconhecimento de fala real não validado: o emulador não recebe voz |
+| Vibração | Toques em teclas, abas, chave e duplo toque no touchpad: nenhuma vibração do app em `dumpsys vibrator_manager`; permissão VIBRATE removida |
+| Celular 0.6 + PC 0.5.0 instalado | Touchpad não arma sozinho ("Ativar touchpad"), sem nome do sistema, Transferir explica "Este PC aceita PNG, JPG ou PDF de até 50 MB…" |
+| APK release (R8) | Instalado por cima da debug mantendo o pareamento; não depurável; todas as abas, microfone e envio sem crash |
+
+Achados corrigidos durante a revisão independente e o teste: rearmar automático contra um PC antigo depois da parada de emergência dele; recusa em cascata de arquivos após cancelar no PC; configurações antigas do painel desfazendo o bloqueio; thread de UI esperando o fsync de um arquivo grande; cancelamento logo depois de salvar apagando o arquivo; nome acima de 255 bytes derrubando a conexão; erro do celular com id nulo lido como protocolo inválido; pesquisa cortada no meio de um emoji; painel de voz preso; rótulo "0,0 de 1,0 GB" no começo de arquivos grandes (agora "43,5 MB de 1,0 GB").
+
+Não testado: celular físico e Wi-Fi real, Android 7 a 9 (gravação na pasta do app), Android 14+ com o serviço `dataSync`, comandos pelo celular no YouTube (aba fechada no meio do teste), Spotify, reconhecimento de fala real, arrastar arquivos para a janela do PC (o caminho do código é o mesmo da fila do seletor) e `powercfg /requests` (exige administrador; o pedido de energia tem teste unitário).
+
 ## Atualização 0.5.0 — atualização pelo app, 16/10/2026
 
 ### Testes automatizados

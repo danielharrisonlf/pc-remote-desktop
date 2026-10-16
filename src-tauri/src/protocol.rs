@@ -4,7 +4,10 @@ use uuid::Uuid;
 pub const PORT: u16 = 43127;
 pub const MAX_FRAME: usize = 512 * 1024;
 pub const MAX_TEXT: usize = 64 * 1024;
+/// files.v1 limit; clients that did not negotiate files.v2 keep it.
 pub const MAX_FILE_BYTES: u64 = 52_428_800;
+/// files.v2 limit, in both directions.
+pub const MAX_FILE_BYTES_V2: u64 = 1_073_741_824;
 pub const FILE_CHUNK_BYTES: usize = 65_536;
 pub const FILE_WINDOW_BYTES: usize = 1_048_576;
 pub const FILE_TEXT_LIMIT: usize = 4_096;
@@ -14,7 +17,12 @@ pub const FEATURES_HEADER: &str = "X-PC-Remote-Features";
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Features {
     pub input: bool,
+    /// files.v1, also implied by files.v2.
     pub files: bool,
+    /// Any file type up to 1 GiB and PC → phone pushes.
+    pub files_v2: bool,
+    pub search: bool,
+    pub info: bool,
 }
 
 impl Features {
@@ -29,11 +37,27 @@ impl Features {
                 match token.trim() {
                     "input.v1" => features.input = true,
                     "files.v1" => features.files = true,
+                    "files.v2" => {
+                        features.files = true;
+                        features.files_v2 = true;
+                    }
+                    "search.v1" => features.search = true,
+                    "info.v1" => features.info = true,
                     _ => {}
                 }
             }
         }
         features
+    }
+
+    /// Tests: the extensions of the 0.2–0.5 clients.
+    #[cfg(test)]
+    pub fn legacy(input: bool, files: bool) -> Self {
+        Self {
+            input,
+            files,
+            ..Self::default()
+        }
     }
 }
 
@@ -137,9 +161,38 @@ pub enum Action {
         #[serde(rename = "transferId")]
         transfer_id: Uuid,
     },
+    /// files.v2: the phone refuses a `file.push` it cannot store.
+    #[serde(rename = "file.decline")]
+    FileDecline {
+        #[serde(rename = "transferId")]
+        transfer_id: Uuid,
+        code: DeclineCode,
+    },
+    /// search.v1: the PC opens a search page with a fixed origin.
+    #[serde(rename = "search.open")]
+    SearchOpen {
+        service: SearchService,
+        query: String,
+    },
 }
 
-/// Text messages accepted on `/v1/files`. Binary frames carry the file bytes.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DeclineCode {
+    Storage,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchService {
+    Youtube,
+}
+
+pub const MAX_SEARCH_CHARS: usize = 200;
+
+/// Text messages accepted on `/v1/files`. Binary frames carry the file bytes:
+/// from the phone after `file.begin`, from the PC after `file.fetch` (files.v2).
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", deny_unknown_fields)]
 pub enum FileClientMessage {
@@ -159,17 +212,63 @@ pub enum FileClientMessage {
         transfer_id: Uuid,
         sha256: String,
     },
+    #[serde(rename = "file.fetch")]
+    Fetch {
+        v: u8,
+        id: Uuid,
+        #[serde(rename = "transferId")]
+        transfer_id: Uuid,
+        ticket: String,
+    },
+    /// Bytes the phone wrote; the only message without an id.
+    #[serde(rename = "file.progress")]
+    Progress {
+        v: u8,
+        #[serde(rename = "transferId")]
+        transfer_id: Uuid,
+        received: u64,
+    },
+    #[serde(rename = "file.done")]
+    Done {
+        v: u8,
+        id: Uuid,
+        #[serde(rename = "transferId")]
+        transfer_id: Uuid,
+        name: String,
+    },
+    #[serde(rename = "error")]
+    Error {
+        v: u8,
+        id: Uuid,
+        code: String,
+        /// Parsed for strictness; the PC shows its own wording.
+        #[allow(dead_code)]
+        message: String,
+        #[allow(dead_code)]
+        retryable: bool,
+    },
 }
 
 impl FileClientMessage {
     pub fn version(&self) -> u8 {
         match self {
-            Self::Begin { v, .. } | Self::End { v, .. } => *v,
+            Self::Begin { v, .. }
+            | Self::End { v, .. }
+            | Self::Fetch { v, .. }
+            | Self::Progress { v, .. }
+            | Self::Done { v, .. }
+            | Self::Error { v, .. } => *v,
         }
     }
+    /// `file.progress` has no id and reports the nil UUID.
     pub fn id(&self) -> Uuid {
         match self {
-            Self::Begin { id, .. } | Self::End { id, .. } => *id,
+            Self::Begin { id, .. }
+            | Self::End { id, .. }
+            | Self::Fetch { id, .. }
+            | Self::Done { id, .. }
+            | Self::Error { id, .. } => *id,
+            Self::Progress { .. } => Uuid::nil(),
         }
     }
 }
@@ -210,7 +309,10 @@ impl Action {
         )
     }
     pub fn is_file(&self) -> bool {
-        matches!(self, Self::FileOffer { .. } | Self::FileCancel { .. })
+        matches!(
+            self,
+            Self::FileOffer { .. } | Self::FileCancel { .. } | Self::FileDecline { .. }
+        )
     }
 }
 
@@ -230,7 +332,14 @@ pub enum MediaCommand {
     Seek,
 }
 
+/// Field rules that do not depend on the connection: files.v1 offers and every other action.
+#[cfg(test)]
 pub fn validate_action(action: &Action) -> Result<(), &'static str> {
+    validate_action_for(action, false)
+}
+
+/// Same rules, with `file.offer` checked against files.v2 when the connection negotiated it.
+pub fn validate_action_for(action: &Action, files_v2: bool) -> Result<(), &'static str> {
     match action {
         Action::VolumeSet { percent } if *percent > 100 => Err("invalid_message"),
         Action::VolumeStep { delta } if *delta != -5 && *delta != 5 => Err("invalid_message"),
@@ -279,10 +388,33 @@ pub fn validate_action(action: &Action) -> Result<(), &'static str> {
             name,
             size,
             mime,
+        } if files_v2 => crate::files::check_offer_v2(*transfer_id, name, *size, mime).map(|_| ()),
+        Action::FileOffer {
+            transfer_id,
+            name,
+            size,
+            mime,
         } => crate::files::check_offer(*transfer_id, name, *size, mime).map(|_| ()),
-        Action::FileCancel { transfer_id } if transfer_id.is_nil() => Err("invalid_message"),
+        Action::FileCancel { transfer_id } | Action::FileDecline { transfer_id, .. }
+            if transfer_id.is_nil() =>
+        {
+            Err("invalid_message")
+        }
+        Action::SearchOpen { query, .. } => search_query(query).map(|_| ()),
         _ => Ok(()),
     }
+}
+
+/// The trimmed query of `search.open`: 1..200 characters, no controls, not only spaces.
+pub fn search_query(raw: &str) -> Result<&str, &'static str> {
+    let query = raw.trim();
+    if query.is_empty()
+        || raw.chars().count() > MAX_SEARCH_CHARS
+        || raw.chars().any(char::is_control)
+    {
+        return Err("invalid_message");
+    }
+    Ok(query)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -375,8 +507,16 @@ pub fn ack(id: Uuid) -> serde_json::Value {
     serde_json::json!({"v":1,"type":"ack","id":id})
 }
 
+/// Which limit a `too_large` error talks about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wording {
+    Control,
+    FilesV1,
+    FilesV2,
+}
+
 /// pt-BR message and retry hint for an error code. File actions report their own size limit.
-pub fn error_text(code: &str, file: bool) -> (&'static str, bool) {
+pub fn error_text(code: &str, wording: Wording) -> (&'static str, bool) {
     match code {
         "version_mismatch" => ("Versão do protocolo incompatível", false),
         "unauthorized" => ("Dispositivo sem autorização", false),
@@ -386,7 +526,8 @@ pub fn error_text(code: &str, file: bool) -> (&'static str, bool) {
         "unavailable" => ("Ação indisponível neste dispositivo ou player", false),
         "conflict" => ("Houve outra cópia antes desta", false),
         "sensitive" => ("Conteúdo marcado como sensível", false),
-        "too_large" if file => ("Arquivo excede 50 MB", false),
+        "too_large" if wording == Wording::FilesV2 => ("Arquivo excede 1 GB", false),
+        "too_large" if wording == Wording::FilesV1 => ("Arquivo excede 50 MB", false),
         "too_large" => ("Texto excede 64 KiB", false),
         "clipboard_busy" => ("Área de transferência ocupada", true),
         "invalid_message" => ("Mensagem inválida", false),
@@ -461,6 +602,70 @@ mod tests {
             assert!(serde_json::from_value::<FileClientMessage>(raw.clone()).is_err());
         }
     }
+    #[test]
+    fn negotiated_06_golden_examples() {
+        let examples: serde_json::Value =
+            serde_json::from_str(include_str!("../../docs/protocol-v1.examples.json")).unwrap();
+        let section = &examples["negotiated06"];
+        let headers: Vec<&[u8]> = section["headers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| h.as_str().unwrap().as_bytes())
+            .collect();
+        assert_eq!(
+            Features::parse(headers),
+            Features {
+                input: true,
+                files: true,
+                files_v2: true,
+                search: true,
+                info: true
+            }
+        );
+        for raw in section["client"].as_array().unwrap() {
+            let ClientMessage::Request { action, .. } =
+                serde_json::from_value::<ClientMessage>(raw.clone()).unwrap()
+            else {
+                panic!("{raw}")
+            };
+            validate_action_for(&action, true).unwrap_or_else(|code| panic!("{code}: {raw}"));
+        }
+        for raw in section["invalidClient"].as_array().unwrap() {
+            let invalid = match serde_json::from_value::<ClientMessage>(raw.clone()) {
+                Ok(ClientMessage::Request { action, .. }) => {
+                    validate_action_for(&action, true).is_err()
+                }
+                Ok(_) => false,
+                Err(_) => true,
+            };
+            assert!(invalid, "{raw}");
+        }
+        for raw in section["fileSocket"]["client"].as_array().unwrap() {
+            let message: FileClientMessage = serde_json::from_value(raw.clone()).unwrap();
+            assert_eq!(message.version(), 1);
+        }
+        for raw in section["fileSocket"]["invalidClient"].as_array().unwrap() {
+            assert!(
+                serde_json::from_value::<FileClientMessage>(raw.clone()).is_err(),
+                "{raw}"
+            );
+        }
+        // The v1 rules still refuse what only files.v2 accepts.
+        let video = &section["client"][0]["action"];
+        let action: Action = serde_json::from_value(video.clone()).unwrap();
+        assert_eq!(validate_action_for(&action, false), Err("too_large"));
+    }
+
+    #[test]
+    fn search_queries_are_trimmed_bounded_and_without_controls() {
+        assert_eq!(search_query("  gatos  "), Ok("gatos"));
+        assert_eq!(search_query(&"é".repeat(200)), Ok("é".repeat(200).as_str()));
+        for bad in ["", "   ", "a\nb", "a\u{7}", &"x".repeat(201)] {
+            assert_eq!(search_query(bad), Err("invalid_message"), "{bad:?}");
+        }
+    }
+
     #[test]
     fn file_offer_rules_and_strict_file_socket_messages() {
         let offer = |name: &str, size: u64, mime: &str| Action::FileOffer {
@@ -550,31 +755,35 @@ mod tests {
     #[test]
     fn file_errors_use_file_wording_without_changing_clipboard_messages() {
         assert_eq!(
-            error_text("too_large", false),
+            error_text("too_large", Wording::Control),
             ("Texto excede 64 KiB", false)
         );
         assert_eq!(
-            error_text("too_large", true),
+            error_text("too_large", Wording::FilesV1),
             ("Arquivo excede 50 MB", false)
         );
         assert_eq!(
-            error_text("file_type", true),
+            error_text("too_large", Wording::FilesV2),
+            ("Arquivo excede 1 GB", false)
+        );
+        assert_eq!(
+            error_text("file_type", Wording::FilesV1),
             ("Tipo de arquivo não permitido", false)
         );
         assert_eq!(
-            error_text("file_busy", true),
+            error_text("file_busy", Wording::FilesV2),
             ("Outro arquivo está sendo recebido", true)
         );
         assert_eq!(
-            error_text("file_integrity", true),
+            error_text("file_integrity", Wording::FilesV1),
             ("Arquivo corrompido durante o envio", true)
         );
         assert_eq!(
-            error_text("storage", true),
+            error_text("storage", Wording::FilesV1),
             ("Não foi possível salvar o arquivo no PC", true)
         );
         assert_eq!(
-            error_text("internal", true),
+            error_text("internal", Wording::FilesV2),
             ("Falha ao executar ação", true)
         );
     }

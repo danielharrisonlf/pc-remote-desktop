@@ -1,7 +1,8 @@
 use crate::{
     core::{Core, Outgoing},
-    files::{self, Accepted},
-    protocol::{self, Action, ClientMessage, Features, FileClientMessage},
+    files::{self, Accepted, FileKind},
+    outbox::Fetched,
+    protocol::{self, Action, ClientMessage, DeclineCode, Features, FileClientMessage, Wording},
 };
 use futures_util::{SinkExt, StreamExt};
 use mdns_sd::{ServiceDaemon, ServiceInfo};
@@ -33,7 +34,6 @@ type ServerSocket = WebSocketStream<tokio_rustls::server::TlsStream<tokio::net::
 
 const FILE_BEGIN_TIMEOUT: Duration = Duration::from_secs(10);
 const FILE_IDLE_TIMEOUT: Duration = Duration::from_secs(20);
-const FILE_TOTAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const FILE_PROGRESS_STEP: u64 = 256 * 1024;
 const FILE_HEAD_BYTES: usize = 1024;
 /// Chunks queued for the blocking writer; matches the 1 MiB client window.
@@ -111,11 +111,16 @@ async fn send(ws: &mut ServerSocket, v: Value) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 async fn error(ws: &mut ServerSocket, id: Uuid, code: &str) -> Result<(), String> {
-    reject(ws, id, code, false).await
+    reject(ws, id, code, Wording::Control).await
 }
-/// Error frame; `file` selects the file-transfer wording for shared codes.
-async fn reject(ws: &mut ServerSocket, id: Uuid, code: &str, file: bool) -> Result<(), String> {
-    let (message, retryable) = protocol::error_text(code, file);
+/// Error frame; `wording` selects the file-transfer limit for shared codes.
+async fn reject(
+    ws: &mut ServerSocket,
+    id: Uuid,
+    code: &str,
+    wording: Wording,
+) -> Result<(), String> {
+    let (message, retryable) = protocol::error_text(code, wording);
     send(ws, protocol::wire_error(id, code, message, retryable)).await
 }
 
@@ -261,23 +266,33 @@ async fn control(core: Arc<Core>, mut ws: ServerSocket, features: Features) -> R
                         }
                     }
                     ClientMessage::Hello {device_id,token,..} if device.is_none()=>{
-                        let epoch = match core.connect_authenticated(device_id,&token,features.input,features.files) { Ok(epoch) => epoch, Err(code) => {error(&mut ws,id,code).await?;break;} };
+                        let epoch = match core.connect_authenticated(device_id,&token,features) { Ok(epoch) => epoch, Err(code) => {error(&mut ws,id,code).await?;break;} };
                         events = core.events.subscribe();
                         first_valid_message=true;device=Some(device_id);cleanup.device=device;cleanup.epoch=epoch;let status=core.status();
                         let mut capabilities = vec!["audio", "media", "clipboard.text"];
                         if features.input { capabilities.push("input.control"); }
                         if features.files { capabilities.push("file.transfer"); }
-                        send(&mut ws,json!({"v":1,"type":"welcome","id":id,"pcId":status.pc_id,"pcName":status.pc_name,"capabilities":capabilities})).await?;
+                        if features.files_v2 { capabilities.push("file.receive"); }
+                        if features.search { capabilities.push("search.youtube"); }
+                        let mut welcome = json!({"v":1,"type":"welcome","id":id,"pcId":status.pc_id,"pcName":status.pc_name,"capabilities":capabilities});
+                        if features.info { welcome["os"] = json!(crate::system::os_name()); }
+                        send(&mut ws,welcome).await?;
                         send(&mut ws,serde_json::to_value(core.snapshot()).map_err(|e|e.to_string())?).await?;
+                        // A push queued while no phone was connected goes out after the first snapshot.
+                        core.outgoing_connected();
                     }
                     ClientMessage::Request {action,..} if device.is_some()=>{
                         if !core.is_authorized_session(device.unwrap(),cleanup.epoch){error(&mut ws,id,"unauthorized").await?;break;}
                         let file = action.is_file();
-                        if file {if let Err(code)=core.file_gate(device.unwrap(),cleanup.epoch,matches!(&action, Action::FileOffer { .. })){reject(&mut ws,id,code,true).await?;continue;}}
-                        if let Err(code)=protocol::validate_action(&action){reject(&mut ws,id,code,file).await?;continue;}
-                        let send_snapshot = !(action.is_input() || file) || matches!(&action, Action::InputEnable { .. });
+                        let files_v2 = core.files_v2(device.unwrap(),cleanup.epoch);
+                        let wording = match (file, files_v2) { (false, _) => Wording::Control, (true, false) => Wording::FilesV1, (true, true) => Wording::FilesV2 };
+                        if file {if let Err(code)=core.file_gate(device.unwrap(),cleanup.epoch){reject(&mut ws,id,code,wording).await?;continue;}}
+                        if matches!(&action, Action::FileDecline { .. }) && !files_v2 {reject(&mut ws,id,"unavailable",wording).await?;continue;}
+                        if matches!(&action, Action::SearchOpen { .. }) && !features.search {error(&mut ws,id,"unavailable").await?;continue;}
+                        if let Err(code)=protocol::validate_action_for(&action,files_v2){reject(&mut ws,id,code,wording).await?;continue;}
+                        let send_snapshot = !(action.is_input() || file || matches!(&action, Action::SearchOpen { .. })) || matches!(&action, Action::InputEnable { .. });
                         let result=dispatch(core.clone(),device.unwrap(),cleanup.epoch,id,action).await;
-                        match result {Ok(reply)=>{if let Some(reply)=reply {send(&mut ws,reply).await?;}if send_snapshot {send(&mut ws,serde_json::to_value(core.snapshot()).map_err(|e|e.to_string())?).await?;}send(&mut ws,protocol::ack(id)).await?},Err(code)=>reject(&mut ws,id,&code,file).await?}
+                        match result {Ok(reply)=>{if let Some(reply)=reply {send(&mut ws,reply).await?;}if send_snapshot {send(&mut ws,serde_json::to_value(core.snapshot()).map_err(|e|e.to_string())?).await?;}send(&mut ws,protocol::ack(id)).await?},Err(code)=>reject(&mut ws,id,&code,wording).await?}
                     }
                     _=>{error(&mut ws,id,"unauthorized").await?;break;}
                 }
@@ -362,15 +377,29 @@ fn parse_file_message(raw: &str) -> Result<FileClientMessage, (Uuid, &'static st
     if message.version() != 1 {
         return Err((message.id(), "version_mismatch"));
     }
-    if message.id().is_nil() {
+    // `file.progress` has no id, and an error may name the nil UUID (PROTOCOL.md).
+    let id_optional = matches!(
+        message,
+        FileClientMessage::Progress { .. } | FileClientMessage::Error { .. }
+    );
+    if message.id().is_nil() && !id_optional {
         return Err((Uuid::nil(), "invalid_message"));
     }
     Ok(message)
 }
 
 async fn close_file_socket(ws: &mut ServerSocket, reply: Option<(Uuid, &str)>, done: bool) {
+    close_file_socket_with(ws, reply, done, Wording::FilesV1).await
+}
+
+async fn close_file_socket_with(
+    ws: &mut ServerSocket,
+    reply: Option<(Uuid, &str)>,
+    done: bool,
+    wording: Wording,
+) {
     if let Some((id, code)) = reply {
-        let _ = reject(ws, id, code, true).await;
+        let _ = reject(ws, id, code, wording).await;
     }
     let frame = done.then(|| CloseFrame {
         code: CloseCode::Normal,
@@ -403,7 +432,7 @@ impl Drop for TransferGuard {
     }
 }
 
-/// `/v1/files`: one ticket-authorized upload per socket.
+/// `/v1/files`: one ticket-authorized upload (`file.begin`) or download (`file.fetch`) per socket.
 async fn file_socket(core: Arc<Core>, mut ws: ServerSocket) -> Result<(), String> {
     let begin_deadline = Instant::now() + FILE_BEGIN_TIMEOUT;
     let (begin_id, accepted) = loop {
@@ -426,6 +455,15 @@ async fn file_socket(core: Arc<Core>, mut ws: ServerSocket) -> Result<(), String
                     Ok(accepted) => break (id, accepted),
                     Err(code) => Some((id, code)),
                 },
+                Ok(FileClientMessage::Fetch {
+                    id,
+                    transfer_id,
+                    ticket,
+                    ..
+                }) => match core.outgoing_fetch(transfer_id, &ticket) {
+                    Ok(fetched) => return send_file(core, ws, id, fetched).await,
+                    Err(code) => Some((id, code)),
+                },
                 Ok(other) => Some((other.id(), "invalid_message")),
                 Err(reply) => Some(reply),
             },
@@ -439,6 +477,12 @@ async fn file_socket(core: Arc<Core>, mut ws: ServerSocket) -> Result<(), String
     };
 
     let transfer_id = accepted.transfer_id;
+    let wording = if accepted.kind == FileKind::Any {
+        Wording::FilesV2
+    } else {
+        Wording::FilesV1
+    };
+    let _awake = crate::power::awake();
     let mut guard = TransferGuard {
         core: core.clone(),
         token: accepted.abort.clone(),
@@ -483,7 +527,7 @@ async fn file_socket(core: Arc<Core>, mut ws: ServerSocket) -> Result<(), String
         Err(abort) => {
             drop(guard);
             core.diagnostic(&abort.diagnostic());
-            close_file_socket(&mut ws, abort.reply(), false).await;
+            close_file_socket_with(&mut ws, abort.reply(), false, wording).await;
         }
     }
     Ok(())
@@ -502,7 +546,8 @@ async fn receive_file(
     let mut head = Vec::with_capacity(FILE_HEAD_BYTES);
     let mut received = 0u64;
     let mut reported = 0u64;
-    let total_deadline = Instant::now() + FILE_TOTAL_TIMEOUT;
+    let total_deadline =
+        Instant::now() + files::total_timeout(accepted.size, accepted.kind == FileKind::Any);
     let mut idle_deadline = Instant::now() + FILE_IDLE_TIMEOUT;
     let mut check = tokio::time::interval(Duration::from_secs(1));
     let end = loop {
@@ -590,6 +635,154 @@ async fn receive_file(
         Ok(Ok(saved)) => Ok((end_id, saved)),
         Ok(Err(error)) => Err(FileAbort::Storage(end_id, error)),
         Err(_) => Err(FileAbort::Reply(end_id, "internal")),
+    }
+}
+
+/// Why a PC → phone transfer stopped: the frame for the phone, if any, and the panel's reason.
+struct SendAbort {
+    frame: Option<Value>,
+    reason: String,
+}
+
+impl SendAbort {
+    fn new(frame: Option<Value>, reason: &str) -> Self {
+        Self {
+            frame,
+            reason: reason.to_string(),
+        }
+    }
+    fn reply(id: Uuid, code: &str, reason: &str) -> Self {
+        let (message, retryable) = protocol::error_text(code, Wording::FilesV2);
+        Self::new(
+            Some(protocol::wire_error(id, code, message, retryable)),
+            reason,
+        )
+    }
+    fn closed() -> Self {
+        Self::new(None, "O celular encerrou o recebimento.")
+    }
+    fn stopped(fetched: &Fetched) -> Self {
+        if fetched
+            .abort
+            .by_user
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            let frame =
+                protocol::wire_error(Uuid::nil(), "unavailable", "Envio cancelado no PC.", false);
+            Self::new(Some(frame), "Envio cancelado.")
+        } else {
+            Self::new(None, "A conexão com o celular terminou.")
+        }
+    }
+    fn from_phone(code: &str) -> Self {
+        let reason = match code {
+            "storage" => "Sem espaço ou falha ao gravar no celular.",
+            "file_integrity" => "O arquivo chegou corrompido ao celular.",
+            _ => "O celular recusou o arquivo.",
+        };
+        Self::new(None, reason)
+    }
+}
+
+/// files.v2 `/v1/files` after `file.fetch`: streams the announced file to the phone.
+async fn send_file(
+    core: Arc<Core>,
+    mut ws: ServerSocket,
+    fetch_id: Uuid,
+    fetched: Fetched,
+) -> Result<(), String> {
+    let _awake = crate::power::awake();
+    let outcome = stream_file(&core, &mut ws, fetch_id, &fetched).await;
+    let (frame, done) = match &outcome {
+        Ok(_) => (None, true),
+        Err(abort) => {
+            core.diagnostic(&format!(
+                "{} não foi enviado ao celular: {}",
+                fetched.name, abort.reason
+            ));
+            (abort.frame.clone(), false)
+        }
+    };
+    core.outgoing_finish(&fetched, outcome.map_err(|abort| abort.reason));
+    if let Some(frame) = frame {
+        let _ = send(&mut ws, frame).await;
+    }
+    close_file_socket(&mut ws, None, done).await;
+    Ok(())
+}
+
+async fn stream_file(
+    core: &Core,
+    ws: &mut ServerSocket,
+    fetch_id: Uuid,
+    fetched: &Fetched,
+) -> Result<String, SendAbort> {
+    let accept = json!({"v":1,"type":"file.accept","id":fetch_id,"transferId":fetched.transfer_id});
+    send(ws, accept).await.map_err(|_| SendAbort::closed())?;
+    let (chunks_tx, mut chunks) = mpsc::channel::<Bytes>(FILE_QUEUE_CHUNKS);
+    let (path, size) = (fetched.path.clone(), fetched.size);
+    let mut reader =
+        tokio::task::spawn_blocking(move || files::read_for_send(&path, size, chunks_tx));
+    let window = protocol::FILE_WINDOW_BYTES as u64;
+    let chunk_bytes = protocol::FILE_CHUNK_BYTES as u64;
+    let (mut sent, mut confirmed) = (0u64, 0u64);
+    let mut end_id: Option<Uuid> = None;
+    let total_deadline = Instant::now() + files::total_timeout(size, true);
+    let mut idle_deadline = Instant::now() + FILE_IDLE_TIMEOUT;
+    let mut check = tokio::time::interval(Duration::from_secs(1));
+    loop {
+        let room = end_id.is_none() && sent - confirmed + chunk_bytes <= window;
+        tokio::select! {
+            _ = fetched.abort.notify.notified() => return Err(SendAbort::stopped(fetched)),
+            _ = tokio::time::sleep_until(idle_deadline) => return Err(SendAbort::reply(Uuid::nil(), "internal", "O celular parou de responder.")),
+            _ = tokio::time::sleep_until(total_deadline) => return Err(SendAbort::reply(Uuid::nil(), "internal", "Tempo esgotado.")),
+            _ = check.tick() => {
+                if core.outgoing_check(fetched, confirmed).is_err() {return Err(SendAbort::stopped(fetched));}
+            }
+            chunk = chunks.recv(), if room => match chunk {
+                Some(chunk) => {
+                    sent += chunk.len() as u64;
+                    if ws.send(Message::Binary(chunk)).await.is_err() {return Err(SendAbort::closed());}
+                }
+                // The reader dropped its sender: everything was read, or it failed.
+                None => match (&mut reader).await {
+                    Ok(Ok(digest)) if sent == size => {
+                        let id = Uuid::new_v4();
+                        end_id = Some(id);
+                        let end = json!({"v":1,"type":"file.end","id":id,"transferId":fetched.transfer_id,"sha256":hex::encode(digest)});
+                        if send(ws, end).await.is_err() {return Err(SendAbort::closed());}
+                    }
+                    Ok(Ok(_)) | Ok(Err(_)) => return Err(SendAbort::reply(Uuid::nil(), "storage", "O arquivo mudou ou não pôde ser lido no PC.")),
+                    Err(_) => return Err(SendAbort::reply(Uuid::nil(), "internal", "Falha ao ler o arquivo.")),
+                },
+            },
+            incoming = ws.next() => {
+                let message = match incoming {
+                    Some(Ok(message)) => message,
+                    Some(Err(WsError::Capacity(_))) => return Err(SendAbort::reply(Uuid::nil(), "invalid_message", "O celular respondeu fora do protocolo.")),
+                    _ => return Err(SendAbort::closed()),
+                };
+                match message {
+                    Message::Text(raw) => match parse_file_message(&raw) {
+                        Ok(FileClientMessage::Progress { transfer_id, received, .. }) if transfer_id == fetched.transfer_id && received >= confirmed && received <= sent => {
+                            if received > confirmed {idle_deadline = Instant::now() + FILE_IDLE_TIMEOUT;}
+                            confirmed = received;
+                            if core.outgoing_check(fetched, confirmed).is_err() {return Err(SendAbort::stopped(fetched));}
+                        }
+                        Ok(FileClientMessage::Done { id, transfer_id, name, .. }) if Some(id) == end_id && transfer_id == fetched.transfer_id && confirmed == size => {
+                            let valid = !name.is_empty() && name.len() <= 1024 && !name.chars().any(char::is_control);
+                            return if valid {Ok(name)} else {Err(SendAbort::reply(id, "invalid_message", "O celular respondeu fora do protocolo."))};
+                        }
+                        Ok(FileClientMessage::Error { code, .. }) => return Err(SendAbort::from_phone(&code)),
+                        Ok(other) => return Err(SendAbort::reply(other.id(), "invalid_message", "O celular respondeu fora do protocolo.")),
+                        Err((id, code)) => return Err(SendAbort::reply(id, code, "O celular respondeu fora do protocolo.")),
+                    },
+                    Message::Binary(_) => return Err(SendAbort::reply(Uuid::nil(), "invalid_message", "O celular respondeu fora do protocolo.")),
+                    Message::Close(_) => return Err(SendAbort::closed()),
+                    Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => {}
+                }
+            }
+        }
     }
 }
 
@@ -720,7 +913,6 @@ mod integration_tests {
                 name: "Files test".into(),
                 token_hash: crate::secrets::token_hash(&token),
             });
-            s.settings.allow_files = true;
         }
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -839,6 +1031,256 @@ mod integration_tests {
         .expect("condition timeout");
     }
 
+    const PHONE_06: &[(&'static str, &str)] = &[
+        ("X-PC-Remote-Features", "input.v1"),
+        ("X-PC-Remote-Features", "files.v1"),
+        ("X-PC-Remote-Features", "files.v2"),
+        ("X-PC-Remote-Features", "search.v1"),
+        ("X-PC-Remote-Features", "info.v1"),
+    ];
+
+    async fn session_06(
+        server: &TestServer,
+        device: Uuid,
+        token: &str,
+    ) -> (TestSocket, Value, Value) {
+        let mut control = connect_with(server.port, &server.certificate_pem, "/v1/ws", PHONE_06)
+            .await
+            .unwrap();
+        emit(
+            &mut control,
+            json!({"v":1,"type":"hello","id":Uuid::new_v4(),"deviceId":device,"token":token}),
+        )
+        .await;
+        let welcome = receive(&mut control, "welcome").await;
+        let state = receive(&mut control, "state").await;
+        (control, welcome, state)
+    }
+
+    /// Deterministic, not compressible by accident, and different per offset.
+    fn pattern(size: usize) -> Vec<u8> {
+        (0..size)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn real_tls_v2_welcome_and_any_type_upload_above_the_old_limit() {
+        let (server, device, token) = file_server().await;
+        let core = server.core.clone();
+        let (mut control, welcome, state) = session_06(&server, device, &token).await;
+        assert_eq!(
+            welcome["capabilities"],
+            json!([
+                "audio",
+                "media",
+                "clipboard.text",
+                "input.control",
+                "file.transfer",
+                "file.receive",
+                "search.youtube"
+            ])
+        );
+        assert_eq!(welcome["os"], crate::system::os_name());
+        assert_eq!(
+            state["files"],
+            json!({"allowed":true,"maxBytes":1_073_741_824})
+        );
+
+        // 60 MB of a type files.v1 refused, sent inside the 1 MiB window.
+        let payload = pattern(60 * 1024 * 1024 + 123);
+        let transfer = Uuid::new_v4();
+        let ticket = offer(
+            &mut control,
+            transfer,
+            "Viagem 2026.mkv",
+            payload.len(),
+            "video/x-matroska",
+        )
+        .await;
+        let mut upload = begin(&server, transfer, &ticket).await;
+        let mut sent = 0usize;
+        let mut confirmed = 0usize;
+        for chunk in payload.chunks(protocol::FILE_CHUNK_BYTES) {
+            while sent + chunk.len() - confirmed > protocol::FILE_WINDOW_BYTES {
+                let progress = next_text(&mut upload).await;
+                assert_eq!(progress["type"], "file.progress");
+                confirmed = progress["received"].as_u64().unwrap() as usize;
+            }
+            upload
+                .send(Message::Binary(chunk.to_vec().into()))
+                .await
+                .unwrap();
+            sent += chunk.len();
+        }
+        let digest = hex::encode(Sha256::digest(&payload));
+        let end = Uuid::new_v4();
+        emit(
+            &mut upload,
+            json!({"v":1,"type":"file.end","id":end,"transferId":transfer,"sha256":digest}),
+        )
+        .await;
+        let done = loop {
+            let message = next_text(&mut upload).await;
+            if message["type"] != "file.progress" {
+                break message;
+            }
+        };
+        assert_eq!(
+            done,
+            json!({"v":1,"type":"file.done","id":end,"transferId":transfer,"name":"Viagem 2026.mkv"})
+        );
+        let folder = core.received_folder().unwrap();
+        let saved = std::fs::read(folder.join("Viagem 2026.mkv")).unwrap();
+        assert_eq!(hex::encode(Sha256::digest(&saved)), digest);
+        assert!(
+            std::fs::read(folder.join("Viagem 2026.mkv:Zone.Identifier"))
+                .unwrap()
+                .starts_with(b"[ZoneTransfer]")
+        );
+
+        // Shell-active files are refused and the 1 GiB limit applies with its own wording.
+        let id = Uuid::new_v4();
+        emit(&mut control, json!({"v":1,"type":"request","id":id,"action":{"kind":"file.offer","transferId":Uuid::new_v4(),"name":"atalho.lnk","size":10,"mime":"application/octet-stream"}})).await;
+        assert_eq!(receive(&mut control, "error").await["code"], "file_type");
+        let id = Uuid::new_v4();
+        emit(&mut control, json!({"v":1,"type":"request","id":id,"action":{"kind":"file.offer","transferId":Uuid::new_v4(),"name":"a.mkv","size":1_073_741_825u64,"mime":"video/x-matroska"}})).await;
+        let error = receive(&mut control, "error").await;
+        assert_eq!(
+            (error["code"].as_str(), error["message"].as_str()),
+            (Some("too_large"), Some("Arquivo excede 1 GB"))
+        );
+    }
+
+    #[tokio::test]
+    async fn real_tls_push_to_phone_respects_the_window_verifies_and_can_be_cancelled() {
+        let (server, device, token) = file_server().await;
+        let core = server.core.clone();
+        let folder = files::tests::temp_folder("push-source");
+        let payload = pattern(3 * 1024 * 1024 + 77);
+        let source = folder.join("Relatório final.pdf");
+        std::fs::write(&source, &payload).unwrap();
+        // Queued before any phone is connected: it waits.
+        assert!(core.enqueue_outgoing(vec![source.clone()]).is_empty());
+        assert!(core.status().outgoing.is_none());
+        let (mut control, ..) = session_06(&server, device, &token).await;
+        let push = receive(&mut control, "file.push").await;
+        assert_eq!(push["name"], "Relatório final.pdf");
+        assert_eq!(push["mime"], "application/pdf");
+        assert_eq!(push["size"], payload.len());
+        let transfer = push["transferId"].as_str().unwrap().to_owned();
+        let ticket = push["ticket"].as_str().unwrap().to_owned();
+
+        let mut download = connect_with(server.port, &server.certificate_pem, "/v1/files", &[])
+            .await
+            .unwrap();
+        let fetch = Uuid::new_v4();
+        emit(
+            &mut download,
+            json!({"v":1,"type":"file.fetch","id":fetch,"transferId":transfer,"ticket":ticket}),
+        )
+        .await;
+        assert_eq!(
+            next_text(&mut download).await,
+            json!({"v":1,"type":"file.accept","id":fetch,"transferId":transfer})
+        );
+        let mut received = Vec::new();
+        let mut reported = 0usize;
+        let end = loop {
+            let message = timeout(Duration::from_secs(5), download.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            match message {
+                Message::Binary(chunk) => {
+                    assert!(!chunk.is_empty() && chunk.len() <= protocol::FILE_CHUNK_BYTES);
+                    received.extend_from_slice(&chunk);
+                    // The PC never runs more than one window ahead of what the phone confirmed.
+                    assert!(received.len() - reported <= protocol::FILE_WINDOW_BYTES);
+                    if received.len() - reported >= 256 * 1024 || received.len() == payload.len() {
+                        reported = received.len();
+                        emit(&mut download, json!({"v":1,"type":"file.progress","transferId":transfer,"received":reported})).await;
+                    }
+                }
+                Message::Text(text) => break serde_json::from_str::<Value>(&text).unwrap(),
+                other => panic!("unexpected {other:?}"),
+            }
+        };
+        assert_eq!(end["type"], "file.end");
+        assert_eq!(received, payload);
+        assert_eq!(end["sha256"], hex::encode(Sha256::digest(&payload)));
+        wait_until(|| {
+            core.status()
+                .outgoing
+                .is_some_and(|file| file.sent == payload.len() as u64)
+        })
+        .await;
+        emit(&mut download, json!({"v":1,"type":"file.done","id":end["id"],"transferId":transfer,"name":"Relatório final (1).pdf"})).await;
+        assert_eq!(closed(&mut download).await, Some(CloseCode::Normal));
+        wait_until(|| {
+            core.status()
+                .outgoing_result
+                .is_some_and(|result| result.ok)
+        })
+        .await;
+        let status = core.status();
+        assert_eq!(
+            status.file_history[0].direction,
+            crate::core::TransferDirection::ToPhone
+        );
+        assert_eq!(status.file_history[0].name, "Relatório final.pdf");
+
+        // Cancelled on the PC while sending: the phone hears it and the next file follows.
+        let second = folder.join("segundo.bin");
+        std::fs::write(&second, pattern(2 * 1024 * 1024)).unwrap();
+        core.enqueue_outgoing(vec![source.clone(), second]);
+        let push = receive(&mut control, "file.push").await;
+        let transfer = push["transferId"].as_str().unwrap().to_owned();
+        let mut download = connect_with(server.port, &server.certificate_pem, "/v1/files", &[])
+            .await
+            .unwrap();
+        emit(&mut download, json!({"v":1,"type":"file.fetch","id":Uuid::new_v4(),"transferId":transfer,"ticket":push["ticket"]})).await;
+        assert_eq!(next_text(&mut download).await["type"], "file.accept");
+        wait_until(|| core.status().outgoing.is_some_and(|file| !file.waiting)).await;
+        core.cancel_outgoing();
+        let error = loop {
+            match timeout(Duration::from_secs(5), download.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()
+            {
+                Message::Text(text) => break serde_json::from_str::<Value>(&text).unwrap(),
+                Message::Binary(_) => {}
+                other => panic!("unexpected {other:?}"),
+            }
+        };
+        assert_eq!(
+            (error["code"].as_str(), error["message"].as_str()),
+            (Some("unavailable"), Some("Envio cancelado no PC."))
+        );
+        let next = receive(&mut control, "file.push").await;
+        assert_eq!(next["name"], "segundo.bin");
+        // The phone declines it: no space.
+        let id = Uuid::new_v4();
+        emit(&mut control, json!({"v":1,"type":"request","id":id,"action":{"kind":"file.decline","transferId":next["transferId"],"code":"storage"}})).await;
+        assert_eq!(receive(&mut control, "ack").await["id"], id.to_string());
+        let result = core.status().outgoing_result.unwrap();
+        assert!(
+            !result.ok && result.message.contains("Sem espaço"),
+            "{}",
+            result.message
+        );
+        // A used ticket cannot be fetched again.
+        let mut replay = connect_with(server.port, &server.certificate_pem, "/v1/files", &[])
+            .await
+            .unwrap();
+        emit(&mut replay, json!({"v":1,"type":"file.fetch","id":Uuid::new_v4(),"transferId":transfer,"ticket":push["ticket"]})).await;
+        assert_eq!(next_text(&mut replay).await["code"], "unauthorized");
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+
     #[test]
     fn feature_header_tokens_from_every_line() {
         use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -847,44 +1289,36 @@ mod integration_tests {
             Features::parse(values.iter().map(|v| v.as_bytes()))
         };
         assert_eq!(parse(&[]), Features::default());
-        assert_eq!(
-            parse(&["input.v1"]),
-            Features {
-                input: true,
-                files: false
-            }
-        );
+        assert_eq!(parse(&["input.v1"]), Features::legacy(true, false));
         assert_eq!(
             parse(&["input.v1", "files.v1"]),
-            Features {
-                input: true,
-                files: true
-            }
+            Features::legacy(true, true)
         );
+        assert_eq!(parse(&["input.v1, files.v1"]), Features::legacy(true, true));
+        assert_eq!(parse(&["files.v1,input.v1"]), Features::legacy(true, true));
+        assert_eq!(parse(&["  files.v1\t"]), Features::legacy(false, true));
         assert_eq!(
-            parse(&["input.v1, files.v1"]),
-            Features {
-                input: true,
-                files: true
-            }
-        );
-        assert_eq!(
-            parse(&["files.v1,input.v1"]),
-            Features {
-                input: true,
-                files: true
-            }
-        );
-        assert_eq!(
-            parse(&["  files.v1\t"]),
-            Features {
-                input: false,
-                files: true
-            }
-        );
-        assert_eq!(
-            parse(&["files.v2", "input.v1x", "INPUT.V1"]),
+            parse(&["files.v3", "input.v1x", "INPUT.V1"]),
             Features::default()
+        );
+        // 0.6 phones: one line per token. files.v2 implies files.v1.
+        assert_eq!(
+            parse(&["input.v1", "files.v1", "files.v2", "search.v1", "info.v1"]),
+            Features {
+                input: true,
+                files: true,
+                files_v2: true,
+                search: true,
+                info: true
+            }
+        );
+        assert_eq!(
+            parse(&["files.v2"]),
+            Features {
+                files: true,
+                files_v2: true,
+                ..Features::default()
+            }
         );
         assert_eq!(parse(&["files.v1;q=1"]), Features::default());
         let raw = [b"files.v1 \xff".as_slice()];
@@ -1017,9 +1451,9 @@ mod integration_tests {
         assert!(part_files(&folder).is_empty());
         let status = core.status();
         assert!(status.incoming_file.is_none());
-        assert_eq!(status.received_files.len(), 1);
-        assert_eq!(status.received_files[0].name, "IMG 0001 (1).png");
-        assert_eq!(status.received_files[0].bytes, payload.len() as u64);
+        assert_eq!(status.file_history.len(), 1);
+        assert_eq!(status.file_history[0].name, "IMG 0001 (1).png");
+        assert_eq!(status.file_history[0].bytes, payload.len() as u64);
         assert_eq!(
             *shown.lock().unwrap(),
             vec![(
@@ -1196,31 +1630,7 @@ mod integration_tests {
         wait_until(|| part_files(&folder).is_empty() && core.status().incoming_file.is_none())
             .await;
 
-        // Switching allowFiles off aborts the transfer and publishes the new state.
-        let transfer = Uuid::new_v4();
-        let ticket = offer(&mut control, transfer, "nota.pdf", 100, "application/pdf").await;
-        let mut upload = begin(&server, transfer, &ticket).await;
-        upload
-            .send(Message::Binary(b"%PDF-".to_vec().into()))
-            .await
-            .unwrap();
-        received(&core, 5).await;
-        let mut settings = core.status().settings;
-        settings.allow_files = false;
-        core.update_settings_with_io(settings, |_| Ok(()), |_| Ok(()))
-            .unwrap();
-        assert_eq!(next_text(&mut upload).await["code"], "unavailable");
-        assert_eq!(
-            receive(&mut control, "state").await["files"]["allowed"],
-            false
-        );
-        assert!(part_files(&folder).is_empty());
-        let id = Uuid::new_v4();
-        emit(&mut control, json!({"v":1,"type":"request","id":id,"action":{"kind":"file.offer","transferId":Uuid::new_v4(),"name":"a.pdf","size":10,"mime":"application/pdf"}})).await;
-        assert_eq!(next_text(&mut control).await["code"], "unavailable");
-
         // The control session ending aborts an active upload.
-        core.state.lock().unwrap().settings.allow_files = true;
         let transfer = Uuid::new_v4();
         let ticket = offer(&mut control, transfer, "nota.pdf", 100, "application/pdf").await;
         let mut upload = begin(&server, transfer, &ticket).await;
@@ -1232,7 +1642,7 @@ mod integration_tests {
         control.close(None).await.unwrap();
         assert_eq!(next_text(&mut upload).await["code"], "unauthorized");
         assert!(part_files(&folder).is_empty());
-        assert!(core.status().received_files.is_empty());
+        assert!(core.status().file_history.is_empty());
         assert!(std::fs::read_dir(&folder).unwrap().next().is_none());
         assert!(core
             .status()
@@ -1395,8 +1805,14 @@ mod integration_tests {
             json!(["audio", "media", "clipboard.text", "input.control"])
         );
         let state = receive(&mut input_ws, "state").await;
-        assert_eq!(state["input"], json!({"allowed":false,"enabled":false}));
+        // Allowed without a PC switch since 0.6; "Interromper" blocks it until "Liberar".
+        assert_eq!(state["input"], json!({"allowed":true,"enabled":false}));
         assert!(state.get("files").is_none());
+        core.stop_input_with_save(|_| Ok(())).unwrap();
+        assert_eq!(
+            receive(&mut input_ws, "state").await["input"],
+            json!({"allowed":false,"enabled":false})
+        );
         emit(&mut input_ws, json!({"v":1,"type":"request","id":Uuid::new_v4(),"action":{"kind":"input.enable","enabled":true}})).await;
         assert_eq!(receive(&mut input_ws, "error").await["code"], "unavailable");
         emit(&mut input_ws, json!({"v":1,"type":"request","id":Uuid::new_v4(),"action":{"kind":"pointer.move","dx":2,"dy":3}})).await;
@@ -1493,8 +1909,36 @@ async fn dispatch(
             })));
         }
         Action::FileCancel { transfer_id } => {
+            // The id names either an upload of the phone or a push of the PC.
             core.file_cancel(device, epoch, transfer_id);
+            core.outgoing_refused(device, epoch, transfer_id, "Cancelado no celular.");
             Ok(())
+        }
+        Action::FileDecline { transfer_id, code } => {
+            let reason = match code {
+                DeclineCode::Storage => "Sem espaço no celular.",
+                DeclineCode::Unavailable => "O celular não pôde receber agora.",
+            };
+            core.outgoing_refused(device, epoch, transfer_id, reason);
+            Ok(())
+        }
+        Action::SearchOpen { service, query } => {
+            let protocol::SearchService::Youtube = service;
+            if !core.search_allowed() {
+                return Err("rate_limited".into());
+            }
+            let query = protocol::search_query(&query)
+                .map_err(str::to_string)?
+                .to_string();
+            let checked = core.clone();
+            tokio::task::spawn_blocking(move || {
+                if !execution_allowed(&checked, device, epoch) {
+                    return Err("unauthorized".to_string());
+                }
+                crate::external::open_youtube_search(&query).map_err(|_| "unavailable".to_string())
+            })
+            .await
+            .map_err(|_| "internal")?
         }
         Action::StateGet => Ok(()),
         Action::VolumeSet { percent } => {
@@ -1521,6 +1965,15 @@ async fn dispatch(
             .map_err(|_| "internal")?
             .map_err(|_| "unavailable")?;
             core.media_changed();
+            // Players apply commands asynchronously; publish their new state as soon as it shows.
+            let later = core.clone();
+            tokio::spawn(async move {
+                for delay in [150, 350, 700] {
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    let core = later.clone();
+                    let _ = tokio::task::spawn_blocking(move || core.media_followup()).await;
+                }
+            });
             Ok(())
         }
         Action::ClipboardSet {

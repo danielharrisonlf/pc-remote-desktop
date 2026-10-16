@@ -21,7 +21,7 @@ pub struct Pairing {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::secrets::Secrets;
+    use crate::{protocol::Features, secrets::Secrets};
 
     #[test]
     fn pairing_save_failure_preserves_credentials_and_allows_a_clean_retry() {
@@ -69,7 +69,7 @@ mod tests {
             assert!(s.revoked_devices.contains(&old_id));
         }
         assert_eq!(
-            core.connect_authenticated(old_id, &old_token, false, false),
+            core.connect_authenticated(old_id, &old_token, Features::legacy(false, false)),
             Err("unauthorized")
         );
         let mut persisted_token_hash = None;
@@ -87,11 +87,11 @@ mod tests {
         assert!(core.state.lock().unwrap().pairing.is_none());
         assert!(!core.state.lock().unwrap().revoked_devices.contains(&new_id));
         assert_eq!(
-            core.connect_authenticated(old_id, &old_token, false, false),
+            core.connect_authenticated(old_id, &old_token, Features::legacy(false, false)),
             Err("unauthorized")
         );
         assert!(core
-            .connect_authenticated(new_id, &token, false, false)
+            .connect_authenticated(new_id, &token, Features::legacy(false, false))
             .is_ok());
     }
 }

@@ -2,14 +2,18 @@ mod audio;
 mod clipboard;
 mod connection;
 mod core;
+mod dialog;
 mod external;
 mod files;
 mod input;
 mod media;
+mod outbox;
 mod pairing;
+mod power;
 mod protocol;
 mod secrets;
 mod settings;
+mod system;
 /// Public for the integration tests in tests/updater.rs.
 pub mod update;
 
@@ -18,7 +22,7 @@ use std::{sync::Arc, time::Duration};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    Manager,
+    DragDropEvent, Emitter, Manager,
 };
 use tauri_plugin_notification::NotificationExt;
 
@@ -50,8 +54,35 @@ fn update_settings(
     core.update_settings(settings)
 }
 #[tauri::command]
-fn stop_input(core: tauri::State<'_, Arc<Core>>) {
-    core.stop_input();
+fn stop_input(core: tauri::State<'_, Arc<Core>>) -> Result<(), String> {
+    core.stop_input()
+}
+#[tauri::command]
+fn unblock_input(core: tauri::State<'_, Arc<Core>>) -> Result<(), String> {
+    core.unblock_input()
+}
+/// Opens the native picker and queues the chosen files; returns one message per file left out.
+#[tauri::command]
+async fn send_files_dialog(
+    app: tauri::AppHandle,
+    core: tauri::State<'_, Arc<Core>>,
+) -> Result<Vec<String>, String> {
+    let owner = app
+        .get_webview_window("main")
+        .and_then(|window| window.hwnd().ok())
+        .map_or(0, |hwnd| hwnd.0 as isize);
+    let paths = tauri::async_runtime::spawn_blocking(move || dialog::pick_files(owner))
+        .await
+        .map_err(|_| "Não foi possível abrir a escolha de arquivos.".to_string())??;
+    Ok(core.enqueue_outgoing(paths))
+}
+#[tauri::command]
+fn cancel_outgoing(core: tauri::State<'_, Arc<Core>>) {
+    core.cancel_outgoing();
+}
+#[tauri::command]
+fn clear_outgoing(core: tauri::State<'_, Arc<Core>>) {
+    core.clear_outgoing();
 }
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
@@ -85,6 +116,10 @@ pub fn run() {
             revoke_device,
             update_settings,
             stop_input,
+            unblock_input,
+            send_files_dialog,
+            cancel_outgoing,
+            clear_outgoing,
             open_url,
             open_received_folder,
             update::update_check,
@@ -121,6 +156,7 @@ pub fn run() {
                 loop {
                     tick.tick().await;
                     poll.check_resume();
+                    poll.outgoing_tick();
                     let core = poll.clone();
                     let _ = tokio::task::spawn_blocking(move || core.refresh()).await;
                 }
@@ -138,7 +174,7 @@ pub fn run() {
             let pause = MenuItem::with_id(
                 app,
                 "pause",
-                "Pausar ou retomar sincronização",
+                "Ligar ou desligar sincronização em tempo real",
                 true,
                 None::<&str>,
             )?;
@@ -146,7 +182,7 @@ pub fn run() {
             let stop_input_item = MenuItem::with_id(
                 app,
                 "stop_input",
-                "Desativar mouse e teclado",
+                "Interromper mouse e teclado",
                 true,
                 None::<&str>,
             )?;
@@ -164,21 +200,31 @@ pub fn run() {
                     "pause" => {
                         let state = app.state::<Arc<Core>>();
                         let mut settings = state.status().settings;
-                        settings.paused = !settings.paused;
+                        settings.realtime = !settings.realtime;
                         let _ = state.update_settings(settings);
                     }
-                    "stop_input" => app.state::<Arc<Core>>().stop_input(),
+                    "stop_input" => {
+                        let _ = app.state::<Arc<Core>>().stop_input();
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
                 .build(app)?;
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 let _ = window.hide();
             }
+            // Files dropped on the panel go to the phone; the paths never reach the webview code.
+            tauri::WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. })
+                if !paths.is_empty() =>
+            {
+                let problems = window.state::<Arc<Core>>().enqueue_outgoing(paths.clone());
+                let _ = window.emit("outgoing-problems", problems);
+            }
+            _ => {}
         })
         .run(tauri::generate_context!())
         .expect("Falha ao iniciar PC Remote");

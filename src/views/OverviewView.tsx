@@ -1,20 +1,17 @@
-import { ArrowRight, ClipboardList, FileImage, Hand, Monitor, MousePointer2, QrCode, Smartphone } from 'lucide-react';
+import { ArrowRight, ClipboardList, Monitor, QrCode, Smartphone, Upload } from 'lucide-react';
 import { desktopApi } from '../api';
 import { Button } from '../components/Button';
-import { CopyButton } from '../components/CopyButton';
 import { DeviceRow, PendingRequest } from '../components/DeviceItems';
 import { EmptyState } from '../components/EmptyState';
-import { FingerprintInline } from '../components/Fingerprint';
 import { SettingSwitch } from '../components/Switch';
-import { preferredAddress } from '../types';
-import { clipboardSummary, filesSummary, inputSummary } from './summaries';
+import { clipboardSummary, sendSummary } from './summaries';
+import { InputControls, useSendFiles } from './TransferView';
 import type { ViewProps } from './viewProps';
 
 const DEVICE_PREVIEW = 3;
 
 export function OverviewView({ status, settings, changeSettings, run, isBusy, serviceState, now, navigate, openPairing }: ViewProps) {
-  const address = preferredAddress(status.addresses);
-  const endpoint = address ? `${address}:${status.port}` : null;
+  const sendFiles = useSendFiles(run);
   const connectedDevice = status.devices.find(device => device.connected);
   const subtitle =
     serviceState === 'unavailable'
@@ -41,33 +38,6 @@ export function OverviewView({ status, settings, changeSettings, run, isBusy, se
             Parear celular
           </Button>
         </div>
-        <dl className="hero-facts">
-          <div className="fact">
-            <dt>Endereço</dt>
-            <dd>
-              {endpoint ? (
-                <>
-                  <span className="fact-value mono">{endpoint}</span>
-                  <CopyButton value={endpoint} label="endereço e porta" />
-                </>
-              ) : (
-                <span className="fact-value muted">Sem rede</span>
-              )}
-            </dd>
-          </div>
-          <div className="fact">
-            <dt>Identidade</dt>
-            <dd>
-              <FingerprintInline value={status.fingerprint} />
-            </dd>
-          </div>
-          <div className="fact">
-            <dt>Celular conectado</dt>
-            <dd>
-              <span className="fact-value">{connectedDevice ? connectedDevice.name : 'Nenhum'}</span>
-            </dd>
-          </div>
-        </dl>
       </section>
 
       <div className="overview-grid">
@@ -135,39 +105,19 @@ export function OverviewView({ status, settings, changeSettings, run, isBusy, se
           <div className="setting-list">
             <SettingSwitch
               icon={ClipboardList}
-              label="Sincronizar área de transferência"
+              label="Sincronização em tempo real"
               description={clipboardSummary(settings)}
-              checked={!settings.paused}
-              onChange={enabled => changeSettings({ paused: !enabled })}
-            />
-            <SettingSwitch
-              icon={MousePointer2}
-              label="Mouse e teclado pelo celular"
-              description={inputSummary(settings, status.inputActive)}
-              checked={settings.allowInput}
-              onChange={allowInput => changeSettings({ allowInput })}
-            />
-            <SettingSwitch
-              icon={FileImage}
-              label="Imagens e PDFs do celular"
-              description={filesSummary(settings, status.incomingFile)}
-              checked={settings.allowFiles}
-              onChange={allowFiles => changeSettings({ allowFiles })}
+              checked={settings.realtime}
+              onChange={realtime => changeSettings({ realtime })}
             />
           </div>
-          {status.inputActive ? (
-            <Button
-              variant="danger"
-              icon={Hand}
-              className="block-btn"
-              loading={isBusy('stopInput')}
-              onClick={() => void run('stopInput', desktopApi.stopInput, 'Controle interrompido.')}
-            >
-              Interromper controle
-            </Button>
-          ) : null}
+          <Button variant="secondary" icon={Upload} className="block-btn" loading={isBusy('sendFiles')} onClick={sendFiles}>
+            Enviar arquivos ao celular
+          </Button>
+          <p className="card-footnote">{status.outgoing ? `Enviando ${status.outgoing.name}…` : sendSummary(status)}</p>
+          {status.inputActive || settings.inputBlocked ? <InputControls status={status} settings={settings} run={run} isBusy={isBusy} /> : null}
           <button type="button" className="card-link" onClick={() => navigate('transfer')}>
-            Mais opções
+            Arquivos e histórico
             <ArrowRight aria-hidden />
           </button>
         </section>

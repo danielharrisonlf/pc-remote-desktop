@@ -1,6 +1,5 @@
-import { CircleArrowUp, LoaderCircle, Moon, RefreshCw, RotateCw, Settings, Sun } from 'lucide-react';
+import { CircleArrowUp, LoaderCircle, RefreshCw, RotateCw, Settings } from 'lucide-react';
 import type { ServiceState } from '../hooks/useStatus';
-import type { ResolvedTheme } from '../hooks/useTheme';
 import { cx } from '../lib/cx';
 import type { UpdateNotice } from '../lib/updates';
 import { IconButton } from './Button';
@@ -17,8 +16,6 @@ interface HeaderProps {
   serviceState: ServiceState;
   serviceDetail: string | null;
   onRetry: () => void;
-  theme: ResolvedTheme;
-  onToggleTheme: () => void;
   onOpenSettings: () => void;
   /** Null hides the update pill. */
   update: UpdateNotice | null;
@@ -27,7 +24,8 @@ interface HeaderProps {
 
 const noticeIcon = { available: CircleArrowUp, busy: LoaderCircle, ready: RotateCw };
 
-export function Header({ title, serviceState, serviceDetail, onRetry, theme, onToggleTheme, onOpenSettings, update, onOpenUpdate }: HeaderProps) {
+/** The theme lives in Configurações only; a second toggle here repeated it. */
+export function Header({ title, serviceState, serviceDetail, onRetry, onOpenSettings, update, onOpenUpdate }: HeaderProps) {
   const NoticeIcon = update ? noticeIcon[update.tone] : null;
   const unavailable = serviceState === 'unavailable';
   const pill = (
@@ -68,7 +66,6 @@ export function Header({ title, serviceState, serviceDetail, onRetry, theme, onT
           </span>
         )}
         <span className="topbar-divider" aria-hidden />
-        <IconButton label={theme === 'dark' ? 'Usar tema claro' : 'Usar tema escuro'} icon={theme === 'dark' ? Sun : Moon} onClick={onToggleTheme} />
         <IconButton label="Configurações" icon={Settings} onClick={onOpenSettings} />
       </div>
     </header>
