@@ -1,6 +1,10 @@
+// Mirrors the serde output of `core::Status` in src-tauri/src/core.rs.
+// Keep field names and optionality in sync with the Rust structs.
+
 export interface PairingSession {
   code: string;
-  expiresAt: string | number;
+  /** Unix milliseconds. */
+  expiresAt: number;
   qrPayload: string;
 }
 
@@ -8,11 +12,15 @@ export interface Device {
   id: string;
   name: string;
   connected: boolean;
+  /** Unix milliseconds of the latest connect/disconnect seen since the app started. */
+  lastSeenAt: number | null;
 }
 
 export interface PendingDevice {
   id: string;
   deviceName: string;
+  /** Unix milliseconds. */
+  requestedAt: number;
 }
 
 export interface Settings {
@@ -21,6 +29,22 @@ export interface Settings {
   paused: boolean;
   autostart: boolean;
   allowInput: boolean;
+}
+
+export interface DiagnosticEntry {
+  /** Unix milliseconds. */
+  at: number;
+  message: string;
+}
+
+export type TransferDirection = 'toPhone' | 'toPc';
+
+/** Clipboard transfer metadata. The backend never sends the copied text. */
+export interface TransferEntry {
+  at: number;
+  direction: TransferDirection;
+  characters: number;
+  automatic: boolean;
 }
 
 export interface DesktopStatus {
@@ -35,16 +59,15 @@ export interface DesktopStatus {
   devices: Device[];
   pending: PendingDevice[];
   settings: Settings;
-  diagnostics: string[];
+  diagnostics: DiagnosticEntry[];
+  /** Newest first. */
+  transfers: TransferEntry[];
 }
+
+export const PROTOCOL_VERSION = 1;
 
 export function preferredAddress(addresses: string[]): string | undefined {
   return addresses.find(address => !/^(127\.|0\.|::1$|localhost$)/i.test(address)) ?? addresses[0];
-}
-
-export function formatExpiry(value: string | number): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'em instantes' : date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
 export function errorMessage(reason: unknown): string {

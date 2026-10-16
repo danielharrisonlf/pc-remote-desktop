@@ -1,0 +1,174 @@
+/*
+ * Design tokens. The light palette lives in :root; the dark palette redefines
+ * only the color tokens, once for the OS preference (unless the user forced
+ * light) and once for an explicit dark choice.
+ */
+:root {
+  color-scheme: light;
+
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, ui-monospace, monospace;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: 26px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 120ms;
+  --duration: 180ms;
+
+  --bg: #f3f5f8;
+  --bg-sidebar: #edf0f4;
+  --surface: #ffffff;
+  --surface-sunken: #f6f8fa;
+  --surface-hover: #eef1f5;
+  --surface-overlay: #ffffff;
+  --segment-selected: #ffffff;
+  --log-bg: #f6f8fa;
+  --border: #e2e7ec;
+  --border-strong: #cbd3db;
+
+  --text: #0f172a;
+  --text-secondary: #4b5866;
+  --text-tertiary: #66727f;
+
+  --accent: #4f50d6;
+  --accent-hover: #4344c0;
+  --accent-pressed: #393aa8;
+  --accent-soft: #eceefe;
+  --accent-soft-hover: #e0e3fd;
+  --accent-border: #c9ccfa;
+  --accent-text: #3e3fb8;
+  --on-accent: #ffffff;
+
+  --success: #12804f;
+  --success-dot: #1aa364;
+  --success-soft: #e5f5ec;
+  --success-border: #b7e2ca;
+  --warning: #8f5300;
+  --warning-soft: #fdf3e3;
+  --warning-border: #f1d6a8;
+  --danger: #c0352b;
+  --danger-hover: #a92d24;
+  --danger-soft: #fdeeed;
+  --danger-border: #f4c7c3;
+  --on-danger: #ffffff;
+
+  --switch-off-thumb: #5c6875;
+  --focus-ring: #4f50d6;
+  --selection: rgb(79 80 214 / 0.18);
+  --scrollbar: #c3ccd5;
+  --scrim: rgb(15 23 42 / 0.36);
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.06);
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.03);
+  --shadow-overlay: 0 18px 44px -14px rgb(15 23 42 / 0.28), 0 4px 12px -4px rgb(15 23 42 / 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #0e1114;
+    --bg-sidebar: #111519;
+    --surface: #161a1f;
+    --surface-sunken: #121519;
+    --surface-hover: #1d2228;
+    --surface-overlay: #1c2128;
+    --segment-selected: #272d35;
+    --log-bg: #0f1215;
+    --border: #252b32;
+    --border-strong: #353d46;
+    --text: #e8ecf0;
+    --text-secondary: #a4aeb9;
+    --text-tertiary: #87919c;
+    --accent: #9fa3ff;
+    --accent-hover: #b1b4ff;
+    --accent-pressed: #8e92f0;
+    --accent-soft: #1f2140;
+    --accent-soft-hover: #272a52;
+    --accent-border: #3a3d73;
+    --accent-text: #b6b9ff;
+    --on-accent: #12133a;
+    --success: #5ad497;
+    --success-dot: #3fcf86;
+    --success-soft: #14261e;
+    --success-border: #24563d;
+    --warning: #f2b862;
+    --warning-soft: #2a2114;
+    --warning-border: #5a4421;
+    --danger: #ff8f84;
+    --danger-hover: #ffa79e;
+    --danger-soft: #2c1717;
+    --danger-border: #5e2b28;
+    --on-danger: #2a0a07;
+    --switch-off-thumb: #a4aeb9;
+    --focus-ring: #a5a9ff;
+    --selection: rgb(159 163 255 / 0.28);
+    --scrollbar: #39414a;
+    --scrim: rgb(0 0 0 / 0.55);
+    --shadow-sm: none;
+    --shadow-card: none;
+    --shadow-overlay: 0 22px 50px -14px rgb(0 0 0 / 0.65);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0e1114;
+  --bg-sidebar: #111519;
+  --surface: #161a1f;
+  --surface-sunken: #121519;
+  --surface-hover: #1d2228;
+  --surface-overlay: #1c2128;
+  --segment-selected: #272d35;
+  --log-bg: #0f1215;
+  --border: #252b32;
+  --border-strong: #353d46;
+  --text: #e8ecf0;
+  --text-secondary: #a4aeb9;
+  --text-tertiary: #87919c;
+  --accent: #9fa3ff;
+  --accent-hover: #b1b4ff;
+  --accent-pressed: #8e92f0;
+  --accent-soft: #1f2140;
+  --accent-soft-hover: #272a52;
+  --accent-border: #3a3d73;
+  --accent-text: #b6b9ff;
+  --on-accent: #12133a;
+  --success: #5ad497;
+  --success-dot: #3fcf86;
+  --success-soft: #14261e;
+  --success-border: #24563d;
+  --warning: #f2b862;
+  --warning-soft: #2a2114;
+  --warning-border: #5a4421;
+  --danger: #ff8f84;
+  --danger-hover: #ffa79e;
+  --danger-soft: #2c1717;
+  --danger-border: #5e2b28;
+  --on-danger: #2a0a07;
+  --switch-off-thumb: #a4aeb9;
+  --focus-ring: #a5a9ff;
+  --selection: rgb(159 163 255 / 0.28);
+  --scrollbar: #39414a;
+  --scrim: rgb(0 0 0 / 0.55);
+  --shadow-sm: none;
+  --shadow-card: none;
+  --shadow-overlay: 0 22px 50px -14px rgb(0 0 0 / 0.65);
+}
