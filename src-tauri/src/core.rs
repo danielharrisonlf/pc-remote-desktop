@@ -24,7 +24,34 @@ pub struct DeviceView {
     pub id: Uuid,
     pub name: String,
     pub connected: bool,
+    /// Unix milliseconds of the latest connect or disconnect seen by this
+    /// process. Kept in RAM only, so it is `None` after the app restarts.
+    #[serde(rename = "lastSeenAt")]
+    pub last_seen_at: Option<u64>,
 }
+#[derive(Clone, Serialize)]
+pub struct DiagnosticEntry {
+    pub at: u64,
+    pub message: String,
+}
+#[derive(Clone, Copy, Serialize, PartialEq, Eq, Debug)]
+pub enum TransferDirection {
+    #[serde(rename = "toPhone")]
+    ToPhone,
+    #[serde(rename = "toPc")]
+    ToPc,
+}
+/// Clipboard transfer metadata for the desktop panel. The copied text itself is
+/// never retained: only direction, time, size and whether it was automatic.
+#[derive(Clone, Serialize)]
+pub struct TransferEntry {
+    pub at: u64,
+    pub direction: TransferDirection,
+    pub characters: usize,
+    pub automatic: bool,
+}
+const MAX_DIAGNOSTICS: usize = 20;
+const MAX_TRANSFERS: usize = 12;
 #[derive(Clone, Serialize)]
 pub struct Status {
     #[serde(rename = "serviceRunning")]
@@ -40,7 +67,8 @@ pub struct Status {
     pub devices: Vec<DeviceView>,
     pub pending: Vec<PendingView>,
     pub settings: Settings,
-    pub diagnostics: Vec<String>,
+    pub diagnostics: Vec<DiagnosticEntry>,
+    pub transfers: Vec<TransferEntry>,
     #[serde(rename = "inputActive")]
     pub input_active: bool,
 }
@@ -75,7 +103,26 @@ pub struct Runtime {
     pub input_feature: bool,
     pub input_enabled: bool,
     pub input_events: VecDeque<Instant>,
-    pub diagnostics: VecDeque<String>,
+    pub diagnostics: VecDeque<DiagnosticEntry>,
+    pub transfers: VecDeque<TransferEntry>,
+    pub last_seen: HashMap<Uuid, u64>,
+}
+impl Runtime {
+    /// Records the moment a device stopped or started being the active session.
+    fn mark_seen(&mut self, id: Uuid) {
+        self.last_seen.insert(id, now_ms());
+    }
+    fn record_transfer(&mut self, direction: TransferDirection, text: &str, automatic: bool) {
+        if self.transfers.len() == MAX_TRANSFERS {
+            self.transfers.pop_front();
+        }
+        self.transfers.push_back(TransferEntry {
+            at: now_ms(),
+            direction,
+            characters: text.chars().count(),
+            automatic,
+        });
+    }
 }
 pub struct Core {
     last_live_tick: AtomicU64,
@@ -177,6 +224,8 @@ impl Core {
                 input_enabled: false,
                 input_events: VecDeque::new(),
                 diagnostics: VecDeque::new(),
+                transfers: VecDeque::new(),
+                last_seen: HashMap::new(),
             }),
             events,
             persist_secrets,
@@ -207,6 +256,7 @@ impl Core {
                     id: d.id,
                     name: d.name.clone(),
                     connected: s.connected == Some(d.id),
+                    last_seen_at: s.last_seen.get(&d.id).copied(),
                 })
                 .collect(),
             pending: s
@@ -215,10 +265,12 @@ impl Core {
                 .map(|(id, p)| PendingView {
                     id: *id,
                     device_name: p.device_name.clone(),
+                    requested_at: p.requested_at,
                 })
                 .collect(),
             settings: s.settings.clone(),
             diagnostics: s.diagnostics.iter().cloned().collect(),
+            transfers: s.transfers.iter().rev().cloned().collect(),
             input_active: s.input_enabled,
         }
     }
@@ -250,6 +302,7 @@ impl Core {
             let _ = self.events.send(Outgoing::Close { device_id: id });
         }
         s.connected = Some(id);
+        s.mark_seen(id);
         s.connection_epoch = s.connection_epoch.wrapping_add(1);
         s.client_sync = SyncSettings::default();
         s.input_feature = input_feature;
@@ -275,6 +328,7 @@ impl Core {
         let mut s = self.state.lock().unwrap();
         if s.connected == Some(id) && s.connection_epoch == epoch {
             s.connected = None;
+            s.mark_seen(id);
             s.client_sync = SyncSettings::default();
             s.input_feature = false;
             s.input_enabled = false;
@@ -301,6 +355,7 @@ impl Core {
         // Deny reconnection in this process even if durable revocation fails.
         // Keep the credential list consistent with disk for a deletion retry.
         s.revoked_devices.insert(id);
+        s.last_seen.remove(&id);
         if s.connected == Some(id) {
             s.connected = None;
             s.connection_epoch = s.connection_epoch.wrapping_add(1);
@@ -411,6 +466,7 @@ impl Core {
             s.client_sync = SyncSettings::default();
             s.connection_epoch = s.connection_epoch.wrapping_add(1);
             if let Some(device_id) = s.connected.take() {
+                s.mark_seen(device_id);
                 let _ = self.events.send(Outgoing::Close { device_id });
             }
             s.revision += 1;
@@ -504,6 +560,7 @@ impl Core {
         s.revision += 1;
         self.publish_state_locked(&s);
         if let (Some(device_id), Some(text)) = (s.connected, text) {
+            s.record_transfer(TransferDirection::ToPhone, &text, true);
             let event = protocol::ClipboardEvent {
                 v: 1,
                 kind: "clipboard.event",
@@ -520,12 +577,13 @@ impl Core {
         }
     }
     pub fn clipboard_get(&self, device: Uuid) -> Result<(), String> {
-        let s = self.state.lock().unwrap();
+        let mut s = self.state.lock().unwrap();
         let before = clipboard::sequence();
         let text = clipboard::read()?.ok_or("unavailable")?;
         if clipboard::sequence() != before {
             return Err("clipboard_busy".into());
         }
+        s.record_transfer(TransferDirection::ToPhone, &text, false);
         let event = protocol::ClipboardEvent {
             v: 1,
             kind: "clipboard.event",
@@ -569,6 +627,7 @@ impl Core {
         s.suppressed_sequence = seq;
         s.clipboard_sequence = seq;
         s.clipboard_revision += 1;
+        s.record_transfer(TransferDirection::ToPc, text, automatic);
         s.event_set.insert(event_id);
         s.event_ids.push_back(event_id);
         if s.event_ids.len() > 256 {
@@ -595,10 +654,13 @@ impl Core {
     }
     pub fn diagnostic(&self, msg: &str) {
         let mut s = self.state.lock().unwrap();
-        if s.diagnostics.len() == 20 {
+        if s.diagnostics.len() == MAX_DIAGNOSTICS {
             s.diagnostics.pop_front();
         }
-        s.diagnostics.push_back(msg.to_string());
+        s.diagnostics.push_back(DiagnosticEntry {
+            at: now_ms(),
+            message: msg.to_string(),
+        });
     }
     pub fn set_service_running(&self, running: bool) {
         self.state.lock().unwrap().service_running = running;
@@ -611,6 +673,7 @@ impl Core {
         }
         let mut s = self.state.lock().unwrap();
         if let Some(device_id) = s.connected.take() {
+            s.mark_seen(device_id);
             s.connection_epoch = s.connection_epoch.wrapping_add(1);
             s.client_sync = SyncSettings::default();
             s.input_feature = false;
@@ -738,6 +801,57 @@ mod tests {
         core.disconnect(id, old);
         assert!(core.is_authorized_session(id, new));
         assert!(!core.is_authorized_session(id, old));
+    }
+    #[test]
+    fn last_seen_follows_sessions_and_is_dropped_on_revocation() {
+        let core = test_core();
+        let id = Uuid::new_v4();
+        let token = random_hex();
+        core.state.lock().unwrap().secrets.devices.push(Device {
+            id,
+            name: "Test".into(),
+            token_hash: secrets::token_hash(&token),
+        });
+        assert_eq!(core.status().devices[0].last_seen_at, None);
+        let epoch = core.connect_authenticated(id, &token, false).unwrap();
+        let connected_at = core.status().devices[0].last_seen_at.unwrap();
+        core.disconnect(id, epoch);
+        let device = &core.status().devices[0];
+        assert!(!device.connected);
+        assert!(device.last_seen_at.unwrap() >= connected_at);
+        core.revoke_with_save(id, |_| Ok(())).unwrap();
+        assert!(!core.state.lock().unwrap().last_seen.contains_key(&id));
+    }
+    #[test]
+    fn transfer_history_keeps_metadata_only_and_is_bounded() {
+        let core = test_core();
+        {
+            let mut s = core.state.lock().unwrap();
+            for index in 0..(MAX_TRANSFERS + 3) {
+                s.record_transfer(TransferDirection::ToPc, "segredo ✓", index % 2 == 0);
+            }
+            s.record_transfer(TransferDirection::ToPhone, "abc", false);
+        }
+        let status = core.status();
+        assert_eq!(status.transfers.len(), MAX_TRANSFERS);
+        // Newest first, sized in characters rather than bytes.
+        assert_eq!(status.transfers[0].direction, TransferDirection::ToPhone);
+        assert_eq!(status.transfers[0].characters, 3);
+        assert_eq!(status.transfers[1].characters, 9);
+        let wire = serde_json::to_string(&status.transfers).unwrap();
+        assert!(!wire.contains("segredo"));
+        assert!(wire.contains("\"toPc\""));
+    }
+    #[test]
+    fn diagnostics_are_timestamped_and_bounded() {
+        let core = test_core();
+        for index in 0..(MAX_DIAGNOSTICS + 5) {
+            core.diagnostic(&format!("evento {index}"));
+        }
+        let diagnostics = core.status().diagnostics;
+        assert_eq!(diagnostics.len(), MAX_DIAGNOSTICS);
+        assert_eq!(diagnostics[0].message, "evento 5");
+        assert!(diagnostics.iter().all(|entry| entry.at > 0));
     }
     #[test]
     fn resume_invalidates_pending_session_without_revoking_credentials() {

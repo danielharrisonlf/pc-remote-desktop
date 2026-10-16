@@ -2,6 +2,7 @@ mod audio;
 mod clipboard;
 mod connection;
 mod core;
+mod external;
 mod input;
 mod media;
 mod pairing;
@@ -48,6 +49,10 @@ fn update_settings(
 fn stop_input(core: tauri::State<'_, Arc<Core>>) {
     core.stop_input();
 }
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    external::open(&url)
+}
 
 pub fn run() {
     tauri::Builder::default()
@@ -63,7 +68,8 @@ pub fn run() {
             approve_pairing,
             revoke_device,
             update_settings,
-            stop_input
+            stop_input,
+            open_url
         ])
         .setup(|app| {
             let identity =

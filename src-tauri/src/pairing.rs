@@ -99,12 +99,15 @@ pub struct PendingView {
     pub id: Uuid,
     #[serde(rename = "deviceName")]
     pub device_name: String,
+    #[serde(rename = "requestedAt")]
+    pub requested_at: u64,
 }
 
 pub struct Pending {
     pub device_id: Uuid,
     pub device_name: String,
     pub generation: u64,
+    pub requested_at: u64,
     pub response: oneshot::Sender<bool>,
 }
 
@@ -180,6 +183,7 @@ impl Core {
                 device_id,
                 device_name,
                 generation,
+                requested_at: now_ms(),
                 response: tx,
             },
         );
