@@ -1,17 +1,17 @@
 # PC Remote Desktop
 
-Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositório Windows independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.4.0, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md) e [validação](docs/TESTING.md).
+Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositório Windows independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.5.0, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md), [validação](docs/TESTING.md) e [como publicar uma versão](docs/RELEASE.md).
 
-## Baixar e instalar — Windows 0.4.0
+## Baixar e instalar — Windows 0.5.0
 
 | Aplicativo | Download |
 |---|---|
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.4.0/pc-remote-desktop-0.4.0-x64-setup.exe) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.5.0/pc-remote-desktop-0.5.0-x64-setup.exe) |
 | Android — APK universal | [Baixar APK 0.4.0](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.4.0-kotlin/pc-remote-android-kotlin-0.4.0-evaluation.apk) |
 
-O instalador Windows fica nas Releases privadas deste repositório: entre no GitHub com uma conta que tenha acesso. O APK Android é público. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.4.0) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.4.0-kotlin) também incluem os hashes SHA-256.
+As Releases dos dois repositórios são públicas. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.5.0) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.4.0-kotlin) também incluem os hashes SHA-256.
 
-Instale o `.exe` no Windows e abra o PC Remote pela bandeja. No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
+Instale o `.exe` no Windows e abra o PC Remote pela bandeja. **Quem já usa a 0.4.0 ou anterior instala a 0.5.0 manualmente uma vez**, por cima da instalação atual (mantenha a opção padrão da página do instalador e não marque a exclusão dos dados); pareamentos e configurações são mantidos. Da 0.5.0 em diante as atualizações chegam pelo próprio app (veja [Atualizações](#atualizações)). No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
 
 Esta é uma versão de avaliação: APK assinado com chave debug e instalador sem Authenticode. A validação em celular físico e players reais permanece pendente; consulte [testes e limitações](docs/TESTING.md).
 
@@ -39,7 +39,7 @@ cargo +stable-x86_64-pc-windows-msvc test --manifest-path src-tauri/Cargo.toml
 npm run tauri build -- --target x86_64-pc-windows-msvc
 ```
 
-O instalador fica em `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/` (ou `target/release/bundle/` sem target explícito). Instale o pacote NSIS `.exe` na sessão do usuário. Fechar a janela oculta o painel e mantém os serviços Rust; use **Encerrar** na bandeja para sair. Inicialização com Windows é configurável no painel. As versões exatas estão em `package-lock.json` e `src-tauri/Cargo.lock`; consulte também [VERSIONS.md](docs/VERSIONS.md).
+O instalador fica em `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/` (ou `target/release/bundle/` sem target explícito). A build assina o instalador para o atualizador e exige `TAURI_SIGNING_PRIVATE_KEY`; sem a chave, [RELEASE.md](docs/RELEASE.md) mostra como gerar um instalador só para teste. Instale o pacote NSIS `.exe` na sessão do usuário. Fechar a janela oculta o painel e mantém os serviços Rust; use **Encerrar** na bandeja para sair. Inicialização com Windows é configurável no painel. As versões exatas estão em `package-lock.json` e `src-tauri/Cargo.lock`; consulte também [VERSIONS.md](docs/VERSIONS.md).
 
 ## Parear e usar
 
@@ -88,9 +88,13 @@ O envio usa uma conexão separada autorizada por um ticket de uso único da sess
 
 ## Atualizações
 
-O Windows consulta `releases/latest` de `pc-remote-desktop` ao abrir e no intervalo escolhido em **Configurações → Atualizações** (1 h, 6 h, 24 h ou manual; padrão 6 h). O resultado fica em cache para respeitar o limite de 60 consultas/h da API pública. Com versão nova, aparece **Versão X disponível** no cabeçalho; o diálogo mostra as notas e abre o instalador no navegador. Nada é instalado sem confirmação, e só URLs de releases deste projeto podem ser abertas pelo comando `open_url`.
+Da 0.5.0 em diante o PC Remote se atualiza pelo próprio app. Ele lê `latest.json` da release mais recente 10 s depois de abrir e no intervalo escolhido em **Configurações → Atualizações** (1 h, 6 h, 24 h ou **Manual**; padrão 6 h).
 
-Enquanto o repositório for privado, a API pública responde 404: a verificação automática fica silenciosa e a manual explica o motivo. Torne o repositório público para o aviso funcionar.
+1. Com **Baixar atualizações automaticamente** (ligado por padrão), a versão nova é baixada em segundo plano, com barra de progresso. Antes de guardar o instalador, o app confere a assinatura com a chave pública embutida e recusa arquivos adulterados ou de outra versão.
+2. O cabeçalho mostra **Atualização pronta** e o cartão **Atualizações** mostra as novidades e o botão **Reiniciar para atualizar**. Nada é instalado antes desse clique. Com o download automático desligado, o botão é **Baixar e instalar**.
+3. Ao reiniciar, o PC Remote fecha, o instalador roda em modo passivo (só uma barra de progresso, sem a página "já instalado" e sem UAC) e o app abre de novo. Pareamentos e configurações são mantidos; a conexão com o celular cai durante a instalação.
+
+Se algo falhar, o cartão explica o motivo e oferece **Tentar de novo** e o link da página da versão, para baixar o instalador pelo navegador. A instalação manual da 0.5.0 sobre a 0.4.0 ou anterior é necessária uma única vez, porque essas versões não têm o atualizador. Como publicar uma versão está em [RELEASE.md](docs/RELEASE.md).
 
 ## Integração contínua
 

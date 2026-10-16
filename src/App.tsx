@@ -15,6 +15,7 @@ import { useTheme } from './hooks/useTheme';
 import { ToastProvider, useToast } from './hooks/useToasts';
 import { useUpdater } from './hooks/useUpdater';
 import { isBoolean, readStored, writeStored } from './lib/storage';
+import { updateNotice } from './lib/updates';
 import { pages, type Page } from './navigation';
 import { DevicesView } from './views/DevicesView';
 import { DiagnosticsView } from './views/DiagnosticsView';
@@ -95,7 +96,7 @@ function Shell() {
         onToggle={() => setCollapsed(!userCollapsed)}
         pendingCount={status?.pending.length ?? 0}
         inputActive={status?.inputActive ?? false}
-        updateAvailable={updater.notify}
+        updateAvailable={updater.state.update !== null}
         version={updater.currentVersion}
       />
       <div className="main-column">
@@ -107,7 +108,7 @@ function Shell() {
           theme={theme.resolved}
           onToggleTheme={theme.toggle}
           onOpenSettings={() => navigate('settings')}
-          updateVersion={updater.notify && updater.release ? updater.release.version : null}
+          update={updateNotice(updater.state)}
           onOpenUpdate={() => setUpdateOpen(true)}
         />
         <main ref={mainRef} className="content" id="main">
@@ -128,7 +129,6 @@ function Shell() {
                 sidebarCollapsed={userCollapsed}
                 onSidebarCollapsedChange={setCollapsed}
                 updater={updater}
-                openUpdate={() => setUpdateOpen(true)}
               />
             )
           ) : serviceState === 'unavailable' ? (

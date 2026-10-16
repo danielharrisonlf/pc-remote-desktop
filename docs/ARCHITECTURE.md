@@ -33,6 +33,20 @@ Futuras ações devem adicionar um tipo validado, autorização, capacidade anun
 
 Cancelamento, `allowFiles` desligado, fim da sessão ou revogação limpam o slot e acordam a transferência, que apaga a parte. Um guarda (`TransferGuard`) também apaga a parte e libera o slot em qualquer saída do handler. A notificação usa `tauri-plugin-notification`; nos testes o notificador não é configurado ou captura as chamadas, e a pasta é temporária.
 
+## Atualizações do Windows (0.5.0)
+
+`update.rs` usa `tauri-plugin-updater` a partir de três comandos do app; a WebView não recebe nenhuma permissão `updater:*`.
+
+1. `update_check` monta o atualizador com o endpoint de `tauri.conf.json` (`releases/latest/download/latest.json`; em debug, `PCREMOTE_UPDATE_ENDPOINT` o substitui), tempo limite de 30 s, e guarda o `Update` encontrado em `UpdateState`. O plugin só devolve versões maiores que a em execução. Retorna versão, notas, data e se o instalador dessa versão já está baixado.
+2. `update_download` baixa o `Update` guardado e envia o progresso por um `Channel` (`started`, `progress` a cada 64 KiB, `finished`). O plugin verifica a assinatura minisign e a versão assinada antes de devolver os bytes, que ficam em memória no Rust. Um segundo download simultâneo é recusado; uma checagem nova que encontra outra versão descarta o download anterior.
+3. `update_install` confere de novo que o instalador baixado é de uma versão maior, grava-o em `%TEMP%` e roda `setup.exe /P /UPDATE /R`. Antes, `on_before_exit` limpa o ícone da bandeja; depois o processo sai com `exit(0)`, o que libera o executável, a porta 43127, o mDNS e a trava do Single Instance. `prevent_close` não interfere, porque não há evento de janela. O NSIS fecha pelo Restart Manager uma instância remanescente, instala e reabre o app.
+
+rustls passou a ter aws-lc-rs e ring compilados (o plugin habilita ring); `connection::install_crypto_provider` fixa aws-lc-rs como provedor do processo no início de `run()`, antes do servidor e das requisições do atualizador, que validam o certificado do GitHub pela raiz do Windows (`rustls-platform-verifier`).
+
+No painel, `lib/updates.ts` é a máquina de estados pura (verificando → disponível → baixando → verificando assinatura → pronta → instalando, ou erro com a etapa a repetir), testada no Vitest; `hooks/useUpdater.ts` agenda as verificações, dispara o download automático e chama os comandos. `components/UpdatePanel.tsx` (progresso, erro com link da release, notas) é usado no cartão **Atualizações** e no diálogo aberto pelo cabeçalho.
+
+Os testes do fluxo ficam em `src-tauri/tests/updater.rs`: um app `MockRuntime` configurado como o `tauri.conf.json` contra um servidor HTTP local, com fixtures assinadas pela CLI do Tauri. Por usar o app simulado (que importa funções do Common Controls v6), o `build.rs` embute um manifesto só nos executáveis de teste (`rustc-link-arg-tests`); o executável de release mantém o manifesto gerado pelo tauri-build. Publicação e chave: [RELEASE.md](RELEASE.md).
+
 ## Fontes oficiais
 
 - [Android clipboard em segundo plano](https://developer.android.com/about/versions/10/privacy/changes#clipboard-data)

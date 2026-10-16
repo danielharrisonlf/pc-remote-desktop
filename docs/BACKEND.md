@@ -1,6 +1,6 @@
 # Backend Windows 0.1.0
 
-O processo Tauri 2 executa o servidor local em Rust. A WebView React só chama comandos de configuração (`get_status`, `start_pairing`, `approve_pairing`, `revoke_device`, `update_settings`, `stop_input`, `open_url`, `open_received_folder`). Fechar a janela a oculta; o menu da bandeja encerra explicitamente o processo. O servidor e as integrações continuam ativos sem JavaScript. O serviço escuta TCP 43127 na sessão do usuário, sem privilégios administrativos ou abertura de porta no roteador. O firewall do Windows pode pedir autorização para redes privadas na primeira execução.
+O processo Tauri 2 executa o servidor local em Rust. A WebView React só chama comandos de configuração (`get_status`, `start_pairing`, `approve_pairing`, `revoke_device`, `update_settings`, `stop_input`, `open_url`, `open_received_folder`) e, desde a 0.5.0, os de atualização (`update_check`, `update_download`, `update_install`; ver [arquitetura](ARCHITECTURE.md#atualizações-do-windows-050)). Fechar a janela a oculta; o menu da bandeja encerra explicitamente o processo. O servidor e as integrações continuam ativos sem JavaScript. O serviço escuta TCP 43127 na sessão do usuário, sem privilégios administrativos ou abertura de porta no roteador. O firewall do Windows pode pedir autorização para redes privadas na primeira execução.
 
 ## Segurança
 

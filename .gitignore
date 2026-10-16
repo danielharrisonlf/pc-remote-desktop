@@ -16,3 +16,13 @@ src-tauri/.tauri/
 *.keystore
 *.jks
 artifacts/
+
+# Updater signing: the private key and its password live only in %USERPROFILE%\.tauri
+.tauri/
+*.key.pub
+*.password.txt
+*signing*.txt
+TAURI_SIGNING_*
+# Release assets written by npm run release:updater
+release-assets/
+/latest*.json

@@ -22,7 +22,13 @@ jobs:
       - run: npm run build
       - run: rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal
       - run: cargo +stable-x86_64-pc-windows-msvc test --locked --manifest-path src-tauri/Cargo.toml
-      - run: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis
+      # Evaluation installer only: without the updater key it skips the updater signature.
+      # Releases are built and signed locally as described in docs/RELEASE.md.
+      - name: Unsigned evaluation installer
+        shell: pwsh
+        run: |
+          '{ "bundle": { "createUpdaterArtifacts": false } }' | Set-Content -Encoding utf8NoBOM "$env:RUNNER_TEMP\no-updater.json"
+          npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis --config "$env:RUNNER_TEMP\no-updater.json"
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: pc-remote-desktop-windows-installer-unsigned

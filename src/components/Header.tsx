@@ -1,7 +1,8 @@
-import { CircleArrowUp, Moon, RefreshCw, Settings, Sun } from 'lucide-react';
+import { CircleArrowUp, LoaderCircle, Moon, RefreshCw, RotateCw, Settings, Sun } from 'lucide-react';
 import type { ServiceState } from '../hooks/useStatus';
 import type { ResolvedTheme } from '../hooks/useTheme';
 import { cx } from '../lib/cx';
+import type { UpdateNotice } from '../lib/updates';
 import { IconButton } from './Button';
 
 const serviceCopy: Record<ServiceState, string> = {
@@ -19,11 +20,15 @@ interface HeaderProps {
   theme: ResolvedTheme;
   onToggleTheme: () => void;
   onOpenSettings: () => void;
-  updateVersion: string | null;
+  /** Null hides the update pill. */
+  update: UpdateNotice | null;
   onOpenUpdate: () => void;
 }
 
-export function Header({ title, serviceState, serviceDetail, onRetry, theme, onToggleTheme, onOpenSettings, updateVersion, onOpenUpdate }: HeaderProps) {
+const noticeIcon = { available: CircleArrowUp, busy: LoaderCircle, ready: RotateCw };
+
+export function Header({ title, serviceState, serviceDetail, onRetry, theme, onToggleTheme, onOpenSettings, update, onOpenUpdate }: HeaderProps) {
+  const NoticeIcon = update ? noticeIcon[update.tone] : null;
   const unavailable = serviceState === 'unavailable';
   const pill = (
     <>
@@ -36,13 +41,16 @@ export function Header({ title, serviceState, serviceDetail, onRetry, theme, onT
     <header className="topbar">
       <h1 className="page-title">{title}</h1>
       <div className="topbar-actions">
-        {updateVersion ? (
-          <button type="button" className="update-pill" onClick={onOpenUpdate} aria-label={`Versão ${updateVersion} disponível`} title="Ver novidades">
-
-            <CircleArrowUp aria-hidden />
-            <span>
-              Versão <span className="tabular">{updateVersion}</span> disponível
-            </span>
+        {update && NoticeIcon ? (
+          <button
+            type="button"
+            className={cx('update-pill', update.tone === 'ready' && 'is-ready')}
+            onClick={onOpenUpdate}
+            aria-label={update.title}
+            title={update.title}
+          >
+            <NoticeIcon className={update.tone === 'busy' ? 'spin' : undefined} aria-hidden />
+            <span className="tabular">{update.label}</span>
           </button>
         ) : null}
         {unavailable ? (

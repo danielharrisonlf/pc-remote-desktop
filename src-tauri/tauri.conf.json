@@ -1,9 +1,17 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "PC Remote",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "identifier": "com.pcremote.desktop",
   "build": { "beforeDevCommand": "npm run dev", "devUrl": "http://localhost:1420", "beforeBuildCommand": "npm run build", "frontendDist": "../dist" },
-  "app": { "windows": [{ "title": "PC Remote", "width": 1000, "height": 740, "minWidth": 640, "minHeight": 520, "center": true }], "security": { "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://api.github.com; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'" } },
-  "bundle": { "active": true, "targets": ["nsis"], "icon": ["icons/icon.png", "icons/icon.ico"], "windows": { "nsis": { "installMode": "currentUser" } } }
+  "app": { "windows": [{ "title": "PC Remote", "width": 1000, "height": 740, "minWidth": 640, "minHeight": 520, "center": true }], "security": { "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'" } },
+  "bundle": { "active": true, "targets": ["nsis"], "createUpdaterArtifacts": true, "icon": ["icons/icon.png", "icons/icon.ico"], "windows": { "nsis": { "installMode": "currentUser" } } },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERGNzIzRDE2QzFBRDhGOEEKUldTS2o2M0JGajF5M3dZU3lNTEMrT1BvRFg3RVIxOWRIOWVVMzUvU1ozcEI2bXFPNzV1OEJMa0MK",
+      "endpoints": ["https://github.com/danielharrisonlf/pc-remote-desktop/releases/latest/download/latest.json"],
+      "requireSignedVersion": true,
+      "windows": { "installMode": "passive" }
+    }
+  }
 }

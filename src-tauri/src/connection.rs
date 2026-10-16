@@ -39,7 +39,16 @@ const FILE_HEAD_BYTES: usize = 1024;
 /// Chunks queued for the blocking writer; matches the 1 MiB client window.
 const FILE_QUEUE_CHUNKS: usize = protocol::FILE_WINDOW_BYTES / protocol::FILE_CHUNK_BYTES;
 
+/// rustls is built with aws-lc-rs (its default, used by this server since 0.1) and ring
+/// (enabled by the updater), so the process-wide provider must be chosen explicitly.
+/// aws-lc-rs stays the provider for the local server and the updater requests.
+/// Installing again is a no-op.
+pub fn install_crypto_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 pub fn tls_config(certificate_pem: &str, key_pem: &str) -> Result<(ServerConfig, String), String> {
+    install_crypto_provider();
     let certs: Vec<CertificateDer<'static>> =
         rustls_pemfile::certs(&mut Cursor::new(certificate_pem))
             .collect::<Result<_, _>>()
@@ -614,6 +623,7 @@ mod integration_tests {
         path: &str,
         headers: &[(&'static str, &str)],
     ) -> Result<TestSocket, WsError> {
+        install_crypto_provider();
         let mut roots = RootCertStore::empty();
         for cert in rustls_pemfile::certs(&mut Cursor::new(cert)) {
             roots.add(cert.unwrap()).unwrap();
@@ -1284,6 +1294,7 @@ mod integration_tests {
         });
 
         // An unrelated trust root fails TLS before any protocol credentials are sent.
+        install_crypto_provider();
         let unrelated = rcgen::generate_simple_self_signed(vec!["pc-remote.local".into()]).unwrap();
         let mut roots = RootCertStore::empty();
         roots.add(unrelated.cert.der().clone()).unwrap();
