@@ -5,7 +5,7 @@ import { EmptyState } from '../components/EmptyState';
 import { FingerprintPanel } from '../components/Fingerprint';
 import { useToast } from '../hooks/useToasts';
 import { copyText } from '../lib/clipboard';
-import { formatClock } from '../lib/format';
+import { formatClock, plural } from '../lib/format';
 import { errorMessage, PROTOCOL_VERSION, preferredAddress, type DesktopStatus } from '../types';
 import type { ViewProps } from './viewProps';
 
@@ -30,6 +30,7 @@ export function buildReport(status: DesktopStatus, appVersion: string, serviceLa
     `Pedidos pendentes: ${status.pending.length}`,
     `Área de transferência: PC→celular ${status.settings.upload ? 'ligado' : 'desligado'}, celular→PC ${status.settings.download ? 'ligado' : 'desligado'}, ${status.settings.paused ? 'pausada' : 'ativa'}`,
     `Mouse e teclado: ${status.settings.allowInput ? 'permitido' : 'bloqueado'}${status.inputActive ? ', em uso' : ''}`,
+    `Arquivos do celular: ${status.settings.allowFiles ? 'permitido' : 'bloqueado'}${status.incomingFile ? ', recebendo' : ''}, ${plural(status.receivedFiles.length, 'recebido', 'recebidos')} nesta execução`,
     `Iniciar com o Windows: ${status.settings.autostart ? 'sim' : 'não'}`,
     '',
     'Eventos recentes:',
@@ -60,7 +61,7 @@ export function DiagnosticsView({ status, serviceState, appVersion, refresh }: D
             <h2 id="identity-title" className="card-title">
               Identidade deste PC
             </h2>
-            <p className="card-description">Ao parear, as cores devem ser iguais às do celular.</p>
+            <p className="card-description">Ao parear, os blocos de código devem ser iguais aos do celular.</p>
           </div>
           <ShieldCheck className="card-glyph" aria-hidden />
         </header>

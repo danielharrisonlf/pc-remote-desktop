@@ -815,19 +815,8 @@ dialog::backdrop {
   height: 16px;
 }
 
-.fp-strip-sm span {
-  width: 7px;
-  height: 12px;
-}
-
 .fp-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
   min-width: 0;
-}
-
-.fp-inline code {
   overflow: hidden;
   font-size: var(--text-md);
   font-weight: 600;
@@ -857,7 +846,6 @@ dialog::backdrop {
 .fp-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-3);
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "pc-remote-desktop"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 
 [lib]
@@ -13,6 +13,7 @@ tauri-build = { version = "2.7.2", features = [] }
 [dependencies]
 tauri = { version = "2.12.3", features = ["tray-icon"] }
 tauri-plugin-single-instance = "=2.5.3"
+tauri-plugin-notification = "=2.5.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }

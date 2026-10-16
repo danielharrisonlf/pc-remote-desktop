@@ -69,7 +69,7 @@ mod tests {
             assert!(s.revoked_devices.contains(&old_id));
         }
         assert_eq!(
-            core.connect_authenticated(old_id, &old_token, false),
+            core.connect_authenticated(old_id, &old_token, false, false),
             Err("unauthorized")
         );
         let mut persisted_token_hash = None;
@@ -87,10 +87,12 @@ mod tests {
         assert!(core.state.lock().unwrap().pairing.is_none());
         assert!(!core.state.lock().unwrap().revoked_devices.contains(&new_id));
         assert_eq!(
-            core.connect_authenticated(old_id, &old_token, false),
+            core.connect_authenticated(old_id, &old_token, false, false),
             Err("unauthorized")
         );
-        assert!(core.connect_authenticated(new_id, &token, false).is_ok());
+        assert!(core
+            .connect_authenticated(new_id, &token, false, false)
+            .is_ok());
     }
 }
 

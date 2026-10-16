@@ -2,6 +2,30 @@
 
 O código contém integrações nativas reais. Testes unitários não comprovam compatibilidade de cada player, permissões do Android nem continuidade durante suspensão. Este registro distingue execução automatizada, execução no Windows deste ambiente e validações pendentes em Android físico.
 
+## Atualização 0.4.0 — arquivos do celular (files.v1) e faixa de cores só no pareamento, 16/10/2026
+
+### Ponta a ponta com o Android 0.4.0-kotlin
+
+- `npm run tauri build -- --target x86_64-pc-windows-msvc`: instalador NSIS de 3.635.721 bytes, sem Authenticode; o painel informa 0.4.0. O instalador não foi executado, para não substituir a instalação 0.3.0 em uso. Os testes usaram o executável release da pasta `target`, com as configurações e a identidade reais deste PC (`%APPDATA%\PC Remote` copiada antes e restaurada no fim).
+- Emulador Android API 33 (x86_64) com o APK 0.4.0-kotlin instalado por cima da 0.2.4, mantendo o pareamento, ligado ao PC por `10.0.2.2:43127`.
+- Com o PC 0.3.0 instalado: o Android 0.4.0 conectou, ativou o touchpad (painel em "Em uso"), mudou volume e mudo do PC pelas teclas físicas e mostrou "Atualize o PC Remote no Windows" em Arquivos. Nenhum pedido de arquivo chegou ao PC (Diagnóstico sem eventos); o PNG compartilhado ficou na fila e saiu depois, já no PC 0.4.0.
+- Painel 0.4.0: Visão geral e Diagnóstico sem a faixa de cores; ela aparece só na gaveta **Parear celular**.
+- Touchpad: o painel seguiu em "Em uso" enquanto o celular trocava de aba; voltou a "Liberado" com o app em segundo plano ou com a cortina de notificações aberta e a "Em uso" sozinho no retorno (o celular mostrou **Ativando…**). **Interromper controle**, bloquear **Mouse e teclado pelo celular** e fechar o executável deixaram o celular desligado, sem rearme.
+- Teclas de volume no Touchpad e em Mídia: 33 → 35 (subir), 35 → 30 e 33 → 30 (descer), mudo alternado, toque longo convergiu em 45 no PC e no app; o volume de mídia do celular não mudou. Em Conexão e Transferir, as teclas mudaram o volume do celular.
+- Arquivos: com a opção desligada, o celular mostrou o aviso; ao ligá-la, o PNG em fila foi enviado sem reconectar. Enviados pelo seletor (um e vários) e por Compartilhar (um e vários, inclusive com o app fechado): PNG, JPG e PDFs de 3 MB e 40 MB. Os 11 arquivos salvos em `Downloads\PC Remote` têm SHA-256 igual ao original e `Zone.Identifier` com `ZoneId=3`; repetições viraram `nome (1).ext`, `(2)` e `(3)`. Lista **Últimos arquivos** e barra de progresso conferidas.
+- Notificação "Arquivo recebido do celular" exibida pelo Windows (captura de tela). O executável fora da pasta de instalação usa o AUMID `com.pcremote.desktop`, já registrado pela instalação 0.3.0; numa máquina sem o PC Remote instalado o resultado pode ser outro.
+- Cancelar no celular a 20% de um PDF de 40 MB e desligar a opção no PC a 4% de outro envio (rede do emulador limitada com `tc`) apagaram a parte `.pcremote-part`; nada foi salvo e o celular explicou o motivo. Um PNG falso foi recusado no celular antes do envio.
+- Texto compartilhado, **Enviar o que copiei** e **Buscar do PC** continuaram funcionando; a área de transferência do PC foi restaurada.
+- Não testado: assinatura inválida recusada pelo PC de ponta a ponta (o Android confere antes; coberto pelos testes Rust), arquivo acima de 50 MB, disco cheio, os tempos limite de 20 s, **Abrir pasta**, instalação pelo NSIS, Wi-Fi real e celular físico.
+
+### Testes automatizados
+
+- Rust/MSVC, no diretório `src-tauri` com o ambiente de `.tools/env.ps1`: `cargo test --target x86_64-pc-windows-msvc`. **53 testes passaram**, quatro smokes ignorados por padrão. A suíte da biblioteca foi repetida 20 vezes sem falhas.
+- Novos testes cobrem sanitização (traversal, caracteres proibidos, nomes reservados, pontos/espaços, truncamento Unicode), matriz MIME/extensão, assinaturas, ticket (expiração, uso único, consumo por segredo errado, epoch, reconexão), nomes únicos sem sobrescrita em pasta temporária, limpeza de partes antigas, recusa de junção, leitura dos tokens do header e preferências antigas sem `allowFiles`.
+- Integração TLS/WebSocket real: hello com `input.v1` e `files.v1` em linhas separadas, `file.offer` → `file.ticket` antes de `ack`, `/v1/files` com begin/accept, blocos de 64 KiB, `file.progress` em 256 KiB e no fim, `file.end` → `file.done` e close 1000. Conferidos bytes salvos, nome `IMG 0001 (1).png` ao lado de um arquivo existente, fluxo `Zone.Identifier`, ausência de partes, histórico, notificação capturada e ticket reutilizado recusado. Abortos testados: assinatura divergente, SHA-256 errado, bytes a mais, frame acima de 64 KiB, `file.cancel`, socket fechado, `allowFiles` desligado e fim da sessão de controle. Cliente legado e cliente só com input.v1 continuam sem `file.transfer` e sem `files`.
+- Todos os testes automatizados usam pasta temporária, sem criar `Downloads\PC Remote`.
+- `npx tsc --noEmit` passou; `npm test`: **25 testes Vitest passaram**; `npm run build` concluiu. Rust, Vitest e TypeScript foram repetidos sobre o código da release, com o mesmo resultado.
+
 ## Atualização 0.3.0 — redesign do painel, 16/10/2026
 
 - **33 testes Rust passaram**, com quatro smokes ignorados por padrão. **23 testes Vitest passaram**, incluindo a faixa de cores da identidade com os mesmos valores do Android, versões semânticas e leitura das releases.

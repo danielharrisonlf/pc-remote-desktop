@@ -1,4 +1,4 @@
-import { ArrowRight, ClipboardList, Hand, Monitor, MousePointer2, QrCode, Smartphone } from 'lucide-react';
+import { ArrowRight, ClipboardList, FileImage, Hand, Monitor, MousePointer2, QrCode, Smartphone } from 'lucide-react';
 import { desktopApi } from '../api';
 import { Button } from '../components/Button';
 import { CopyButton } from '../components/CopyButton';
@@ -7,7 +7,7 @@ import { EmptyState } from '../components/EmptyState';
 import { FingerprintInline } from '../components/Fingerprint';
 import { SettingSwitch } from '../components/Switch';
 import { preferredAddress } from '../types';
-import { clipboardSummary, inputSummary } from './summaries';
+import { clipboardSummary, filesSummary, inputSummary } from './summaries';
 import type { ViewProps } from './viewProps';
 
 const DEVICE_PREVIEW = 3;
@@ -146,6 +146,13 @@ export function OverviewView({ status, settings, changeSettings, run, isBusy, se
               description={inputSummary(settings, status.inputActive)}
               checked={settings.allowInput}
               onChange={allowInput => changeSettings({ allowInput })}
+            />
+            <SettingSwitch
+              icon={FileImage}
+              label="Imagens e PDFs do celular"
+              description={filesSummary(settings, status.incomingFile)}
+              checked={settings.allowFiles}
+              onChange={allowFiles => changeSettings({ allowFiles })}
             />
           </div>
           {status.inputActive ? (

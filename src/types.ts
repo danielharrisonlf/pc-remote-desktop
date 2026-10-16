@@ -29,6 +29,7 @@ export interface Settings {
   paused: boolean;
   autostart: boolean;
   allowInput: boolean;
+  allowFiles: boolean;
 }
 
 export interface DiagnosticEntry {
@@ -47,6 +48,21 @@ export interface TransferEntry {
   automatic: boolean;
 }
 
+/** A file saved in Downloads\PC Remote. Metadata only, kept in RAM by the backend. */
+export interface ReceivedFile {
+  /** Unix milliseconds. */
+  at: number;
+  name: string;
+  bytes: number;
+}
+
+/** The upload in progress, if any. */
+export interface IncomingFile {
+  name: string;
+  bytes: number;
+  received: number;
+}
+
 export interface DesktopStatus {
   serviceRunning: boolean;
   inputActive: boolean;
@@ -62,6 +78,9 @@ export interface DesktopStatus {
   diagnostics: DiagnosticEntry[];
   /** Newest first. */
   transfers: TransferEntry[];
+  /** Newest first, at most 12. */
+  receivedFiles: ReceivedFile[];
+  incomingFile: IncomingFile | null;
 }
 
 export const PROTOCOL_VERSION = 1;

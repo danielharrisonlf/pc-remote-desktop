@@ -39,7 +39,7 @@ PC → cliente:
 | clipboard.get | nenhum | Leitura explícita; evento com automatic:false |
 | sync.set | upload,download,paused: boolean | Preferências da conexão, inicialmente false,false,false |
 
-Ack confirma execução, nunca apenas enfileiramento. Erros: `invalid_message`, `version_mismatch`, `unauthorized`, `pairing_expired`, `pairing_denied`, `rate_limited`, `unavailable`, `conflict`, `sensitive`, `too_large`, `clipboard_busy`, `internal`. Não ecoar conteúdo/credenciais em erros. IDs de request repetidos na conexão não executam novamente; cliente não reutiliza comandos após reconectar.
+Ack confirma execução, nunca apenas enfileiramento. Erros: `invalid_message`, `version_mismatch`, `unauthorized`, `pairing_expired`, `pairing_denied`, `rate_limited`, `unavailable`, `conflict`, `sensitive`, `too_large`, `clipboard_busy`, `internal` e, na extensão files.v1, `file_type`, `file_busy`, `file_integrity`, `storage`. Não ecoar conteúdo/credenciais em erros. IDs de request repetidos na conexão não executam novamente; cliente não reutiliza comandos após reconectar.
 
 ## Estado e capacidades
 
@@ -54,7 +54,7 @@ Estado não inclui conteúdo do clipboard. Snapshot após hello/reconexão não 
 
 O Android solicita a extensão no upgrade WebSocket com `X-PC-Remote-Features: input.v1`. O header não concede acesso; autorização permanece pelo token individual dentro do TLS validado. Hello não muda. Desktop antigo ignora o header. Desktop novo só inclui `input.control` no welcome e o campo opcional `input` nos snapshots de uma conexão que negociou a extensão. Clientes antigos recebem exatamente as capacidades e formato antigos.
 
-Snapshot negociado acrescenta `"input":{"allowed":false,"enabled":false}`. `allowed` indica a permissão local do Windows; `enabled` indica ativação nesta conexão. Ambos começam falsos. A permissão pode ser persistida pelo PC, mas a ativação nunca é persistida. Revogação, troca de conexão, suspensão, desconexão e bloqueio no PC limpam a ativação. A ação de emergência no PC invalida o epoch e encerra a conexão para impedir reativação por requests antigos; as credenciais continuam válidas. O Android desativa e descarta fila ao perder foco; ao retomar requer nova ação explícita.
+Snapshot negociado acrescenta `"input":{"allowed":false,"enabled":false}`. `allowed` indica a permissão local do Windows; `enabled` indica ativação nesta conexão. Ambos começam falsos. A permissão pode ser persistida pelo PC, mas a ativação nunca é persistida. Revogação, troca de conexão, suspensão, desconexão e bloqueio no PC limpam a ativação. A ação de emergência no PC invalida o epoch e encerra a conexão para impedir reativação por requests antigos; as credenciais continuam válidas. O Android desarma o PC e descarta a fila ao perder o foco da janela ou ir para segundo plano. Se o usuário não desligou o touchpad, o Android envia `input.enable` de novo ao voltar ao primeiro plano com foco, na mesma conexão autenticada; nova conexão, bloqueio ou desligamento no PC exigem ação explícita.
 
 | kind | Campos | Limites / resultado |
 |---|---|---|
@@ -77,7 +77,49 @@ Sem histórico persistente. Servidor serializa leituras, notificações Windows 
 
 Android acompanha alterações apenas em foco. Ao retomar estabelece baseline sem enviar texto preexistente. Windows acompanha WM_CLIPBOARDUPDATE, sem snapshot de conteúdo no início. Sincronização desativada por padrão em ambos; direção exige consentimento nos dois aplicativos. Aplicação automática no Android é preferência separada, somente em foco. Segundo plano não garante conexão; se houver recepção antes da suspensão, notificação genérica sem conteúdo abre app. Não há serviço permanente no MVP.
 
-Android bloqueia texto com EXTRA_IS_SENSITIVE. Windows bloqueia ExcludeClipboardContentFromMonitorProcessing e CanUploadToCloudClipboard=0. Isso não detecta todas as senhas. Unicode e quebras preservados; rejeitar NUL e texto acima do limite. Imagens/arquivos requerem capacidades e versão futuras; não estão neste protocolo.
+Android bloqueia texto com EXTRA_IS_SENSITIVE. Windows bloqueia ExcludeClipboardContentFromMonitorProcessing e CanUploadToCloudClipboard=0. Isso não detecta todas as senhas. Unicode e quebras preservados; rejeitar NUL e texto acima do limite. O clipboard continua só texto; imagens e PDFs do celular para o PC usam a extensão files.v1.
+
+## Extensão negociada files.v1 — imagens e PDFs do celular
+
+O Android envia o header em linhas separadas: `X-PC-Remote-Features: input.v1` e `X-PC-Remote-Features: files.v1`. Desktop até 0.3.0 lê só a primeira linha e nunca anuncia arquivos. Desktop novo junta todas as linhas e separa tokens por vírgula ou espaço (`input.v1, files.v1` numa linha também vale). O header não concede acesso. Só com files.v1 negociado o welcome acrescenta `file.transfer` e o snapshot acrescenta `"files":{"allowed":<allowFiles>,"maxBytes":52428800}`; os demais clientes recebem exatamente o formato anterior. `allowFiles` começa desligado e é persistido pelo PC; alterá-lo incrementa `revision` e publica o estado.
+
+| kind | Campos | Regras / resultado |
+|---|---|---|
+| file.offer | transferId: UUID; name: string; size: inteiro; mime: string | Nesta ordem: negociado e `allowFiles`, senão `unavailable`; transferId não nulo, name 1..255 bytes UTF-8 sem controles e size ≥ 1, senão `invalid_message`; size > 52.428.800 → `too_large`; mime `image/png`, `image/jpeg` ou `application/pdf` com extensão sanitizada correspondente (png; jpg/jpeg; pdf), senão `file_type`; um ticket ou transferência por PC, senão `file_busy` (retryable); espaço livre ≥ size + 64 MiB, senão `storage`. Sucesso: `file.ticket` e depois `ack`, sem snapshot |
+| file.cancel | transferId: UUID | Descarta o ticket não usado ou aborta a transferência com esse id, apagando os dados parciais. Sempre `ack`; id desconhecido não é erro; sem snapshot |
+
+```json
+{"v":1,"type":"file.ticket","id":"<id do request>","transferId":"uuid","ticket":"<64 hex minúsculos>","chunkBytes":65536,"windowBytes":1048576}
+```
+
+O ticket tem 32 bytes aleatórios, vale 30 s, é de uso único e fica vinculado a deviceId, epoch da conexão, transferId, nome sanitizado, tamanho e MIME. A comparação é em tempo constante; qualquer tentativa que cite o transferId do ticket o consome.
+
+Socket de arquivo `wss://pc-remote.local:43127/v1/files`: mesmo listener e certificado de `/v1/ws`, `Origin` rejeitado, frames binários até 65.536 bytes e texto até 4.096 bytes, JSON estrito com `v:1`.
+
+1. Cliente, em até 10 s: `{"v":1,"type":"file.begin","id":"uuid","transferId":"uuid","ticket":"hex"}`.
+2. PC consome o ticket, confere validade, sessão com o mesmo epoch, negociação e `allowFiles`, e responde `{"v":1,"type":"file.accept","id":"<id do begin>","transferId":"uuid"}`. Problema de ticket ou sessão → `unauthorized`; `allowFiles` desligado → `unavailable`.
+3. Cliente envia frames binários de 1..chunkBytes, com no máximo windowBytes enviados e ainda não confirmados.
+4. PC envia `{"v":1,"type":"file.progress","transferId":"uuid","received":n}` a cada 256 KiB recebidos e quando `received == size`.
+5. Cliente, após exatamente `size` bytes: `{"v":1,"type":"file.end","id":"uuid","transferId":"uuid","sha256":"<64 hex minúsculos>"}`.
+6. PC confere tamanho, SHA-256 e assinatura (PNG `89 50 4E 47 0D 0A 1A 0A`, JPEG `FF D8 FF`, PDF `%PDF-` nos primeiros 1024 bytes), salva, notifica e responde `{"v":1,"type":"file.done","id":"<id do end>","transferId":"uuid","name":"<nome final>"}`, seguido de close 1000.
+
+| code | Quando | retryable |
+|---|---|---|
+| `unauthorized` | ticket inválido, expirado ou usado; sessão encerrada ou revogada | false |
+| `invalid_message` | JSON inválido, ordem errada, frame acima do limite | false |
+| `unavailable` | files.v1 não negociado ou `allowFiles` desligado, inclusive durante o envio | false |
+| `too_large` | tamanho declarado acima do limite ou mais bytes que o declarado ("Arquivo excede 50 MB") | false |
+| `file_type` | MIME/extensão não permitidos ou divergentes; assinatura diferente | false |
+| `file_busy` | outra transferência em andamento | true |
+| `file_integrity` | menos bytes que o declarado em `file.end` ou SHA-256 diferente | true |
+| `storage` | espaço insuficiente, pasta indisponível ou falha de E/S | true |
+| `internal` | demais falhas, inclusive tempo esgotado | true |
+
+Erros usam o frame `error` padrão (id da mensagem ou UUID nulo) e fecham o socket; dados parciais são sempre apagados. No clipboard, `too_large` continua "Texto excede 64 KiB". O PC aborta após 20 s sem frames, 15 min de transferência, fim ou revogação da sessão de controle (conferida a cada frame), `file.cancel`, `allowFiles` desligado ou socket fechado antes de `file.done`. Após `file.cancel` o socket fecha sem frame de erro. O Android aborta se `file.progress` não avança por 20 s ou se a conexão de controle cai.
+
+Armazenamento no Windows: pasta Downloads (Known Folder; fallback `%USERPROFILE%\Downloads`) + `PC Remote`, criada sob demanda e recusada se não for pasta comum (link simbólico, junção ou reparse point). O nome é reduzido ao último componente; controles, `<>:"/\|?*` e marcas bidirecionais são removidos; espaços são colapsados; pontos e espaços nas pontas são removidos; a extensão fica minúscula; base vazia vira `arquivo`; nomes reservados (CON, PRN, AUX, NUL, COM0-9, LPT0-9, também com extensão) ganham `_`; a base fica com até 100 caracteres. Os bytes vão para `.<transferId>.pcremote-part` (create_new); partes antigas são apagadas antes da primeira transferência. Após a verificação: `sync_all`, marca `:Zone.Identifier` com ZoneId=3 e movimento sem substituir para `nome.ext`, `nome (1).ext` … `nome (99).ext` ou `nome <8 primeiros caracteres do transferId>.ext`.
+
+Cliente Android: fontes são o seletor do sistema (`ACTION_OPEN_DOCUMENT` com png/jpeg/pdf e seleção múltipla) e Compartilhar (`ACTION_SEND`/`ACTION_SEND_MULTIPLE` com os três tipos), só com URIs `content://`. Nome por `OpenableColumns.DISPLAY_NAME`, tamanho por `OpenableColumns.SIZE` ou `openAssetFileDescriptor().length` (tamanho desconhecido é recusado), MIME por `ContentResolver.getType` ou pela extensão; os primeiros bytes conferem a assinatura antes de entrar na fila, e o nome passa pela mesma limpeza do PC, ganhando a extensão certa quando falta. O ticket é validado estritamente (campos exatos, hex minúsculo, `chunkBytes` 1..65.536, `windowBytes` ≥ `chunkBytes`) e só vale para a oferta em andamento; qualquer outro é liberado com `file.cancel`. Fila sequencial de até 20 arquivos; o progresso exibido é o `received` do PC. O SHA-256 é calculado durante a leitura; se o arquivo render outro número de bytes, o envio é cancelado com "O arquivo mudou durante o envio." Sem `file.transfer` no welcome, o Android não mostra nem envia nada de arquivos. Exemplos de todas as mensagens em `protocol-v1.examples.json`, com as do socket de arquivos em `fileSocket`.
 
 ## Compatibilidade
 
@@ -87,6 +129,9 @@ Android bloqueia texto com EXTRA_IS_SENSITIVE. Windows bloqueia ExcludeClipboard
 | 0.1.x | 0.2.x | 1 sem extensão | Volume, mídia e clipboard compatíveis; mouse/teclado indisponíveis |
 | 0.2.x | 0.1.x | 1 sem extensão | Controles anteriores compatíveis; Android orienta atualizar PC para mouse/teclado |
 | 0.2.x | 0.2.x | 1 + input.v1 | Mouse/teclado após consentimento nos dois aplicativos |
+| sem files.v1 | com files.v1 | 1 (+ input.v1) | Sem capacidade nem campo de estado novos; formato anterior |
+| com files.v1 | até 0.3.0 | 1 + input.v1 | Desktop lê só a primeira linha do header; arquivos indisponíveis |
+| com files.v1 | com files.v1 | 1 + input.v1 + files.v1 | Imagens e PDFs após permitir no PC |
 | 0.1.x / 0.2.x | versão sem protocolo 1 | outro | Rejeitado com version_mismatch |
 
 ## Ciclo de vida e extensão

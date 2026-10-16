@@ -11,4 +11,6 @@ export const desktopApi = {
   stopInput: () => invoke<void>('stop_input'),
   /** Opens a project GitHub release URL in the default browser (allowlisted in Rust). */
   openUrl: (url: string) => invoke<void>('open_url', { url }),
+  /** Creates Downloads\PC Remote if needed and opens it in Explorer. */
+  openReceivedFolder: () => invoke<void>('open_received_folder'),
 };

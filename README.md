@@ -1,15 +1,15 @@
 # PC Remote Desktop
 
-Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositório Windows independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.3.0, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md) e [validação](docs/TESTING.md).
+Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositório Windows independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.4.0, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md) e [validação](docs/TESTING.md).
 
-## Baixar e instalar — Windows 0.3.0
+## Baixar e instalar — Windows 0.4.0
 
 | Aplicativo | Download |
 |---|---|
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.3.0/pc-remote-desktop-0.3.0-x64-setup.exe) |
-| Android — APK universal | [Baixar APK 0.3.0](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.3.0-kotlin/pc-remote-android-kotlin-0.3.0-evaluation.apk) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.4.0/pc-remote-desktop-0.4.0-x64-setup.exe) |
+| Android — APK universal | [Baixar APK 0.4.0](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.4.0-kotlin/pc-remote-android-kotlin-0.4.0-evaluation.apk) |
 
-O instalador Windows fica nas Releases privadas deste repositório: entre no GitHub com uma conta que tenha acesso. O APK Android é público. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.3.0) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.3.0-kotlin) também incluem os hashes SHA-256.
+O instalador Windows fica nas Releases privadas deste repositório: entre no GitHub com uma conta que tenha acesso. O APK Android é público. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.4.0) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.4.0-kotlin) também incluem os hashes SHA-256.
 
 Instale o `.exe` no Windows e abra o PC Remote pela bandeja. No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
 
@@ -74,9 +74,17 @@ Veja [testes e pendências](docs/TESTING.md) antes de considerar a build validad
 2. No Android, em **Mouse e teclado**, toque em **Ativar controle** nesta conexão.
 3. Deslize no touchpad para mover o cursor e toque para clicar. Os botões abaixo oferecem clique direito, duplo clique, rolagem e as teclas comuns. Digite no campo de texto e toque em **Digitar**.
 4. O alvo é o aplicativo em foco no Windows. Selecione a janela desejada antes de enviar texto. O controle não exibe a tela do PC.
-5. Para interromper, toque em **Desativar controle** no celular, use **Interromper** em Transferência ou na Visão geral do Windows, ou o menu da bandeja. Bloquear a permissão no PC também interrompe o controle.
+5. Para interromper, toque em **Desligar** no celular, use **Interromper** em Transferência ou na Visão geral do Windows, ou o menu da bandeja. Bloquear a permissão no PC também interrompe o controle.
 
-A ativação é descartada ao desconectar, suspender ou colocar o Android em segundo plano. É necessário ativar novamente; movimentos, cliques e textos pendentes não são repetidos. Texto digitado fica somente em RAM e não entra em logs/histórico. O limite por envio é **1.024 bytes UTF-8**, sem caracteres de controle; use os botões Enter e Tab para essas teclas. Aplicativos elevados, tela de bloqueio/UAC e algumas interfaces podem recusar entrada. Teclas físicas pressionadas no PC podem interferir. Veja [INPUT.md](docs/INPUT.md) para detalhes e validações.
+A ativação vale para a conexão: trocar de aba no Android não a desliga. Em segundo plano ou sem foco, o Android desarma o PC na hora e reativa sozinho ao voltar, na mesma conexão. Desconectar, **Desligar** ou bloquear no PC exigem ativar novamente; movimentos, cliques e textos pendentes não são repetidos. Texto digitado fica somente em RAM e não entra em logs/histórico. O limite por envio é **1.024 bytes UTF-8**, sem caracteres de controle; use os botões Enter e Tab para essas teclas. Aplicativos elevados, tela de bloqueio/UAC e algumas interfaces podem recusar entrada. Teclas físicas pressionadas no PC podem interferir. Veja [INPUT.md](docs/INPUT.md) para detalhes e validações.
+
+## Imagens e PDFs do celular
+
+1. No Windows, abra **Transferência** e ligue **Receber imagens e PDFs do celular** no cartão **Arquivos do celular**. A opção começa desligada.
+2. No Android, escolha os arquivos no aplicativo ou use **Compartilhar** em outro app. São aceitos PNG, JPG e PDF de até 50 MB, um de cada vez.
+3. O PC salva em **Downloads\PC Remote**, nunca sobrescreve um arquivo existente (acrescenta `(1)`, `(2)`…) e marca cada arquivo como vindo da internet. Uma notificação do Windows avisa quando o arquivo chega; **Abrir pasta** mostra a pasta.
+
+O envio usa uma conexão separada autorizada por um ticket de uso único da sessão já pareada. Nome, tipo, tamanho e SHA-256 são conferidos antes de salvar; envios interrompidos são descartados. Desligar a opção no PC interrompe o envio em andamento. O painel guarda apenas nome, tamanho e horário dos últimos 12 arquivos, em RAM. Requer PC e Android com a extensão files.v1; versões anteriores continuam funcionando sem ela.
 
 ## Atualizações
 

@@ -4,6 +4,38 @@ use uuid::Uuid;
 pub const PORT: u16 = 43127;
 pub const MAX_FRAME: usize = 512 * 1024;
 pub const MAX_TEXT: usize = 64 * 1024;
+pub const MAX_FILE_BYTES: u64 = 52_428_800;
+pub const FILE_CHUNK_BYTES: usize = 65_536;
+pub const FILE_WINDOW_BYTES: usize = 1_048_576;
+pub const FILE_TEXT_LIMIT: usize = 4_096;
+pub const FEATURES_HEADER: &str = "X-PC-Remote-Features";
+
+/// Extensions requested in the WebSocket upgrade. The header grants nothing by itself.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Features {
+    pub input: bool,
+    pub files: bool,
+}
+
+impl Features {
+    /// Reads every header line and every comma or whitespace separated token.
+    pub fn parse<'a>(values: impl IntoIterator<Item = &'a [u8]>) -> Self {
+        let mut features = Self::default();
+        for value in values {
+            let Ok(text) = std::str::from_utf8(value) else {
+                continue;
+            };
+            for token in text.split(|c: char| c == ',' || c.is_whitespace()) {
+                match token.trim() {
+                    "input.v1" => features.input = true,
+                    "files.v1" => features.files = true,
+                    _ => {}
+                }
+            }
+        }
+        features
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", deny_unknown_fields)]
@@ -92,6 +124,54 @@ pub enum Action {
     KeyboardText { text: String },
     #[serde(rename = "keyboard.key")]
     KeyboardKey { key: KeyboardKey },
+    #[serde(rename = "file.offer")]
+    FileOffer {
+        #[serde(rename = "transferId")]
+        transfer_id: Uuid,
+        name: String,
+        size: u64,
+        mime: String,
+    },
+    #[serde(rename = "file.cancel")]
+    FileCancel {
+        #[serde(rename = "transferId")]
+        transfer_id: Uuid,
+    },
+}
+
+/// Text messages accepted on `/v1/files`. Binary frames carry the file bytes.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", deny_unknown_fields)]
+pub enum FileClientMessage {
+    #[serde(rename = "file.begin")]
+    Begin {
+        v: u8,
+        id: Uuid,
+        #[serde(rename = "transferId")]
+        transfer_id: Uuid,
+        ticket: String,
+    },
+    #[serde(rename = "file.end")]
+    End {
+        v: u8,
+        id: Uuid,
+        #[serde(rename = "transferId")]
+        transfer_id: Uuid,
+        sha256: String,
+    },
+}
+
+impl FileClientMessage {
+    pub fn version(&self) -> u8 {
+        match self {
+            Self::Begin { v, .. } | Self::End { v, .. } => *v,
+        }
+    }
+    pub fn id(&self) -> Uuid {
+        match self {
+            Self::Begin { id, .. } | Self::End { id, .. } => *id,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -128,6 +208,9 @@ impl Action {
                 | Self::KeyboardText { .. }
                 | Self::KeyboardKey { .. }
         )
+    }
+    pub fn is_file(&self) -> bool {
+        matches!(self, Self::FileOffer { .. } | Self::FileCancel { .. })
     }
 }
 
@@ -191,6 +274,13 @@ pub fn validate_action(action: &Action) -> Result<(), &'static str> {
         {
             Err("invalid_message")
         }
+        Action::FileOffer {
+            transfer_id,
+            name,
+            size,
+            mime,
+        } => crate::files::check_offer(*transfer_id, name, *size, mime).map(|_| ()),
+        Action::FileCancel { transfer_id } if transfer_id.is_nil() => Err("invalid_message"),
         _ => Ok(()),
     }
 }
@@ -248,12 +338,21 @@ pub struct StateSnapshot {
     pub sync: SyncSettings,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<InputState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files: Option<FilesState>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct InputState {
     pub allowed: bool,
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FilesState {
+    pub allowed: bool,
+    #[serde(rename = "maxBytes")]
+    pub max_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -274,6 +373,29 @@ pub fn wire_error(id: Uuid, code: &str, message: &str, retryable: bool) -> serde
 }
 pub fn ack(id: Uuid) -> serde_json::Value {
     serde_json::json!({"v":1,"type":"ack","id":id})
+}
+
+/// pt-BR message and retry hint for an error code. File actions report their own size limit.
+pub fn error_text(code: &str, file: bool) -> (&'static str, bool) {
+    match code {
+        "version_mismatch" => ("Versão do protocolo incompatível", false),
+        "unauthorized" => ("Dispositivo sem autorização", false),
+        "pairing_expired" => ("Código inválido ou expirado", false),
+        "pairing_denied" => ("Pareamento recusado no PC", false),
+        "rate_limited" => ("Muitas tentativas. Tente depois.", true),
+        "unavailable" => ("Ação indisponível neste dispositivo ou player", false),
+        "conflict" => ("Houve outra cópia antes desta", false),
+        "sensitive" => ("Conteúdo marcado como sensível", false),
+        "too_large" if file => ("Arquivo excede 50 MB", false),
+        "too_large" => ("Texto excede 64 KiB", false),
+        "clipboard_busy" => ("Área de transferência ocupada", true),
+        "invalid_message" => ("Mensagem inválida", false),
+        "file_type" => ("Tipo de arquivo não permitido", false),
+        "file_busy" => ("Outro arquivo está sendo recebido", true),
+        "file_integrity" => ("Arquivo corrompido durante o envio", true),
+        "storage" => ("Não foi possível salvar o arquivo no PC", true),
+        _ => ("Falha ao executar ação", true),
+    }
 }
 
 #[cfg(test)]
@@ -330,6 +452,131 @@ mod tests {
                 assert!(validate_action(&action).is_err());
             }
         }
+        for raw in examples["fileSocket"]["client"].as_array().unwrap() {
+            let msg: FileClientMessage = serde_json::from_value(raw.clone()).unwrap();
+            assert_eq!(msg.version(), 1);
+            assert!(raw.to_string().len() <= FILE_TEXT_LIMIT);
+        }
+        for raw in examples["fileSocket"]["invalidClient"].as_array().unwrap() {
+            assert!(serde_json::from_value::<FileClientMessage>(raw.clone()).is_err());
+        }
+    }
+    #[test]
+    fn file_offer_rules_and_strict_file_socket_messages() {
+        let offer = |name: &str, size: u64, mime: &str| Action::FileOffer {
+            transfer_id: Uuid::new_v4(),
+            name: name.into(),
+            size,
+            mime: mime.into(),
+        };
+        assert_eq!(validate_action(&offer("a.png", 1, "image/png")), Ok(()));
+        assert_eq!(
+            validate_action(&offer("a.pdf", MAX_FILE_BYTES, "application/pdf")),
+            Ok(())
+        );
+        let longest = format!("{}.jpg", "é".repeat(125));
+        assert_eq!(longest.len(), 254);
+        assert_eq!(validate_action(&offer(&longest, 1, "image/jpeg")), Ok(()));
+        for (name, size, mime, code) in [
+            ("a.png", 0, "image/png", "invalid_message"),
+            ("a.png", MAX_FILE_BYTES + 1, "image/png", "too_large"),
+            ("", 1, "image/png", "invalid_message"),
+            ("a\n.png", 1, "image/png", "invalid_message"),
+            ("a\0.png", 1, "image/png", "invalid_message"),
+            ("a.png", 1, "image/jpeg", "file_type"),
+            ("a.gif", 1, "image/gif", "file_type"),
+        ] {
+            assert_eq!(
+                validate_action(&offer(name, size, mime)),
+                Err(code),
+                "{name}"
+            );
+        }
+        let too_long = format!("{}.png", "a".repeat(252));
+        assert_eq!(
+            validate_action(&offer(&too_long, 1, "image/png")),
+            Err("invalid_message")
+        );
+        assert_eq!(
+            validate_action(&Action::FileOffer {
+                transfer_id: Uuid::nil(),
+                name: "a.png".into(),
+                size: 1,
+                mime: "image/png".into()
+            }),
+            Err("invalid_message")
+        );
+        assert_eq!(
+            validate_action(&Action::FileCancel {
+                transfer_id: Uuid::nil()
+            }),
+            Err("invalid_message")
+        );
+        let request = |action: serde_json::Value| {
+            serde_json::from_value::<ClientMessage>(
+                serde_json::json!({"v":1,"type":"request","id":Uuid::new_v4(),"action":action}),
+            )
+        };
+        let id = Uuid::new_v4();
+        for size in [
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("10"),
+        ] {
+            assert!(request(serde_json::json!({"kind":"file.offer","transferId":id,"name":"a.png","size":size,"mime":"image/png"})).is_err());
+        }
+        assert!(request(serde_json::json!({"kind":"file.offer","transferId":id,"name":"a.png","size":1,"mime":"image/png","path":"C:\\"})).is_err());
+        assert!(
+            request(serde_json::json!({"kind":"file.cancel","transferId":id,"force":true}))
+                .is_err()
+        );
+        let file = |value: serde_json::Value| serde_json::from_value::<FileClientMessage>(value);
+        assert!(file(
+            serde_json::json!({"v":1,"type":"file.begin","id":id,"transferId":id,"ticket":"ab"})
+        )
+        .is_ok());
+        assert!(file(serde_json::json!({"v":1,"type":"file.begin","id":id,"transferId":id,"ticket":"ab","name":"x"})).is_err());
+        assert!(
+            file(serde_json::json!({"v":1,"type":"file.end","id":id,"transferId":id})).is_err()
+        );
+        assert!(
+            file(serde_json::json!({"v":1,"type":"file.chunk","id":id,"transferId":id})).is_err()
+        );
+        assert!(
+            file(serde_json::json!({"v":1,"type":"hello","id":id,"deviceId":id,"token":"t"}))
+                .is_err()
+        );
+    }
+    #[test]
+    fn file_errors_use_file_wording_without_changing_clipboard_messages() {
+        assert_eq!(
+            error_text("too_large", false),
+            ("Texto excede 64 KiB", false)
+        );
+        assert_eq!(
+            error_text("too_large", true),
+            ("Arquivo excede 50 MB", false)
+        );
+        assert_eq!(
+            error_text("file_type", true),
+            ("Tipo de arquivo não permitido", false)
+        );
+        assert_eq!(
+            error_text("file_busy", true),
+            ("Outro arquivo está sendo recebido", true)
+        );
+        assert_eq!(
+            error_text("file_integrity", true),
+            ("Arquivo corrompido durante o envio", true)
+        );
+        assert_eq!(
+            error_text("storage", true),
+            ("Não foi possível salvar o arquivo no PC", true)
+        );
+        assert_eq!(
+            error_text("internal", true),
+            ("Falha ao executar ação", true)
+        );
     }
     #[test]
     fn escaped_unicode_frame_fits_limit() {

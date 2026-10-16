@@ -10,7 +10,7 @@ O cliente integra OkHttp com trust manager específico para o certificado do PC,
 
 ## Windows
 
-Tauri 2 fornece painel React local e bandeja; os comandos IPC configuram o serviço Rust. Rust controla conexão WSS, pareamento em pairing.rs, autorização por dispositivo, DPAPI, mDNS, Core Audio, GSMTC, clipboard e configurações. Fechar a janela oculta; encerrar pela bandeja encerra serviços. Single Instance impede um segundo painel com estado divergente; a inicialização de identidade/serviços ocorre depois dessa proteção.
+Tauri 2 fornece painel React local e bandeja; os comandos IPC configuram o serviço Rust. Rust controla conexão WSS, pareamento em pairing.rs, autorização por dispositivo, DPAPI, mDNS, Core Audio, GSMTC, clipboard, recebimento de arquivos em files.rs e configurações. Fechar a janela oculta; encerrar pela bandeja encerra serviços. Single Instance impede um segundo painel com estado divergente; a inicialização de identidade/serviços ocorre depois dessa proteção.
 
 Core Audio inicializa COM na thread de operação e serializa alterações. Sessões GSMTC vivem numa thread MTA dedicada, com canal de comandos e UUID associado à identidade COM; controles dependem das capacidades reais. Clipboard usa janela nativa invisível com AddClipboardFormatListener/WM_CLIPBOARDUPDATE, owner HWND válido nas escritas e retry limitado quando ocupado. Um watchdog nativo de 5 segundos detecta lacunas de execução, invalida a conexão e exige novo snapshot; ações em espera revalidam a geração/autorização no momento de executar. Não há replay de mídia ou clipboard.
 
@@ -20,7 +20,18 @@ Texto remoto aplicado é reconhecido para impedir eco. Eventos têm UUID/origem,
 
 Convite de dois minutos combina endereço e identidade do certificado com segredo temporário; sempre há aprovação local no PC. Tokens aleatórios individuais são protegidos no Android e hashes no Windows. Revogação fecha sessões. Mensagens e tipos são validados em runtime com limites antes do dispatch. Uma conexão autenticada pode solicitar apenas ações do enum do protocolo. Sem entrada que represente shell ou comando arbitrário.
 
-Futuras ações devem adicionar um tipo validado, autorização, capacidade anunciada e integração Rust correspondente. Adaptadores de player podem implementar uma interface de mídia, desde que sua capacidade real seja documentada. Transferência de imagens/arquivos exige novo contrato e limites próprios. Fallback de teclado não foi habilitado no MVP: deverá exigir configuração de alvo e checagem da janela antes de enviar teclas.
+Futuras ações devem adicionar um tipo validado, autorização, capacidade anunciada e integração Rust correspondente. Adaptadores de player podem implementar uma interface de mídia, desde que sua capacidade real seja documentada. Imagens e PDFs do celular usam o contrato próprio files.v1 (ver abaixo); outros tipos exigiriam nova extensão. Fallback de teclado não foi habilitado no MVP: deverá exigir configuração de alvo e checagem da janela antes de enviar teclas.
+
+## Arquivos do celular (files.v1)
+
+`files.rs` concentra tickets, sanitização de nomes, regras de MIME/extensão e assinatura, escrita da parte, marca de origem e nome final. O fluxo:
+
+1. O celular envia `file.offer` na conexão de controle. `connection.rs` confere negociação e `allowFiles`, valida os campos e chama `Core::file_offer` numa thread bloqueante, que prepara `Downloads\PC Remote`, confere espaço livre e grava o ticket no `Runtime` (um único slot por PC). A resposta é `file.ticket` e depois `ack`.
+2. O celular abre `/v1/files` no mesmo listener. O handshake roteia pelo caminho; o socket é reembrulhado com limites próprios (binário 64 KiB, texto 4 KiB). `file.begin` consome o ticket e transforma o slot em transferência ativa.
+3. Cada frame binário passa por `Core::file_check` (sessão, epoch, `allowFiles`, slot) e entra numa fila limitada a 16 blocos. Uma tarefa `spawn_blocking` calcula o SHA-256 e grava com buffer de 256 KiB, sem bloquear o runtime; a fila cheia aplica contrapressão no socket.
+4. Em `file.end`, o PC confere tamanho, hash e assinatura, faz `sync_all`, grava `Zone.Identifier` e move com `MoveFileExW` sem substituição. Depois registra o metadado (até 12 itens em RAM), chama o notificador injetado e responde `file.done`.
+
+Cancelamento, `allowFiles` desligado, fim da sessão ou revogação limpam o slot e acordam a transferência, que apaga a parte. Um guarda (`TransferGuard`) também apaga a parte e libera o slot em qualquer saída do handler. A notificação usa `tauri-plugin-notification`; nos testes o notificador não é configurado ou captura as chamadas, e a pasta é temporária.
 
 ## Fontes oficiais
 
@@ -35,6 +46,6 @@ Futuras ações devem adicionar um tipo validado, autorização, capacidade anun
 
 ## Interface
 
-A impressão digital SHA-256 é mostrada em 16 blocos de 4 caracteres e numa faixa de 8 cores derivada por XOR dos 32 bytes. O mesmo algoritmo existe em `src/lib/fingerprint.ts` (Windows) e `Fingerprint.kt` (Android), com valores de teste idênticos. No pareamento por código, o celular fixa o certificado da primeira conexão e mostra essa faixa para comparação com o PC.
+A impressão digital SHA-256 é mostrada em 16 blocos de 4 caracteres e numa faixa de 8 cores derivada por XOR dos 32 bytes. O mesmo algoritmo existe em `src/lib/fingerprint.ts` (Windows) e `Fingerprint.kt` (Android), com valores de teste idênticos. No pareamento por código, o celular fixa o certificado da primeira conexão e mostra essa faixa para comparação com o PC. No Windows a faixa aparece só na gaveta de pareamento; Visão geral mostra o código curto e Diagnóstico os 16 blocos.
 
 Windows: `App.tsx` só compõe o shell. `hooks/` concentra estado (`useStatus` com polling encadeado sem sobreposição e último estado preservado em falhas, `useSettings` com alterações serializadas, `useTheme`, `useUpdater`, `useToasts`), `components/` os blocos visuais (barra lateral retrátil, cabeçalho com status, gaveta de pareamento com aprovação inline, diálogos nativos `<dialog>`, toasts em top layer) e `views/` as páginas Visão geral, Dispositivos, Transferência, Diagnóstico e Configurações. O backend expõe também horário do último contato por dispositivo, horário dos pedidos de pareamento, eventos com data e o histórico de transferências apenas com metadados, tudo em RAM.

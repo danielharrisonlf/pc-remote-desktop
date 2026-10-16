@@ -1,7 +1,11 @@
 pub use crate::pairing::{Pairing, Pending, PendingView};
 use crate::{
-    audio, clipboard, media,
-    protocol::{self, Action, AudioState, InputState, MediaState, StateSnapshot, SyncSettings},
+    audio, clipboard,
+    files::{IncomingFile, ReceivedFile, Slot},
+    media,
+    protocol::{
+        self, Action, AudioState, FilesState, InputState, MediaState, StateSnapshot, SyncSettings,
+    },
     secrets::{self, Secrets},
     settings::{self, Settings},
 };
@@ -10,9 +14,10 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex, OnceLock,
     },
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
@@ -71,6 +76,11 @@ pub struct Status {
     pub transfers: Vec<TransferEntry>,
     #[serde(rename = "inputActive")]
     pub input_active: bool,
+    /// Newest first; names and sizes only.
+    #[serde(rename = "receivedFiles")]
+    pub received_files: Vec<ReceivedFile>,
+    #[serde(rename = "incomingFile")]
+    pub incoming_file: Option<IncomingFile>,
 }
 #[derive(Clone)]
 pub enum Outgoing {
@@ -103,11 +113,20 @@ pub struct Runtime {
     pub input_feature: bool,
     pub input_enabled: bool,
     pub input_events: VecDeque<Instant>,
+    pub files_feature: bool,
+    pub file_slot: Option<Slot>,
+    pub received_files: VecDeque<ReceivedFile>,
     pub diagnostics: VecDeque<DiagnosticEntry>,
     pub transfers: VecDeque<TransferEntry>,
     pub last_seen: HashMap<Uuid, u64>,
 }
 impl Runtime {
+    pub(crate) fn session_ok(&self, id: Uuid, epoch: u64) -> bool {
+        self.connected == Some(id)
+            && self.connection_epoch == epoch
+            && !self.revoked_devices.contains(&id)
+            && self.secrets.devices.iter().any(|d| d.id == id)
+    }
     /// Records the moment a device stopped or started being the active session.
     fn mark_seen(&mut self, id: Uuid) {
         self.last_seen.insert(id, now_ms());
@@ -124,11 +143,18 @@ impl Runtime {
         });
     }
 }
+/// Shows a native notification (title, body). Injected so tests never show toasts.
+pub type Notifier = Box<dyn Fn(&str, &str) + Send + Sync>;
+
 pub struct Core {
     last_live_tick: AtomicU64,
     pub state: Mutex<Runtime>,
     pub events: broadcast::Sender<Outgoing>,
     pub(crate) persist_secrets: bool,
+    /// Parent of the `PC Remote` folder; `None` resolves the Downloads known folder.
+    pub(crate) files_root: Option<PathBuf>,
+    pub(crate) files_cleaned: AtomicBool,
+    pub(crate) notifier: OnceLock<Notifier>,
 }
 
 pub(crate) fn now_ms() -> u64 {
@@ -183,14 +209,21 @@ fn ordered_addresses(
 impl Core {
     #[cfg(test)]
     pub(crate) fn ephemeral(secrets: Secrets, fingerprint: String) -> Arc<Self> {
-        let core = Self::build(secrets, fingerprint, false);
+        // Tests never write to the real Downloads folder.
+        let root = std::env::temp_dir().join(format!("pc-remote-test-{}", Uuid::new_v4()));
+        let core = Self::build(secrets, fingerprint, false, Some(root));
         core.state.lock().unwrap().settings = Settings::default();
         core
     }
     pub fn new(secrets: Secrets, fingerprint: String) -> Arc<Self> {
-        Self::build(secrets, fingerprint, true)
+        Self::build(secrets, fingerprint, true, None)
     }
-    fn build(secrets: Secrets, fingerprint: String, persist_secrets: bool) -> Arc<Self> {
+    fn build(
+        secrets: Secrets,
+        fingerprint: String,
+        persist_secrets: bool,
+        files_root: Option<PathBuf>,
+    ) -> Arc<Self> {
         let (events, _) = broadcast::channel(64);
         let name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC Windows".into());
         Arc::new(Self {
@@ -223,13 +256,22 @@ impl Core {
                 input_feature: false,
                 input_enabled: false,
                 input_events: VecDeque::new(),
+                files_feature: false,
+                file_slot: None,
+                received_files: VecDeque::new(),
                 diagnostics: VecDeque::new(),
                 transfers: VecDeque::new(),
                 last_seen: HashMap::new(),
             }),
             events,
             persist_secrets,
+            files_root,
+            files_cleaned: AtomicBool::new(false),
+            notifier: OnceLock::new(),
         })
+    }
+    pub fn set_notifier(&self, notifier: Notifier) {
+        let _ = self.notifier.set(notifier);
     }
     pub fn status(&self) -> Status {
         let s = self.state.lock().unwrap();
@@ -272,6 +314,8 @@ impl Core {
             diagnostics: s.diagnostics.iter().cloned().collect(),
             transfers: s.transfers.iter().rev().cloned().collect(),
             input_active: s.input_enabled,
+            received_files: s.received_files.iter().rev().cloned().collect(),
+            incoming_file: s.incoming_file(),
         }
     }
     pub fn connect_authenticated(
@@ -279,6 +323,7 @@ impl Core {
         id: Uuid,
         token: &str,
         input_feature: bool,
+        files_feature: bool,
     ) -> Result<u64, &'static str> {
         if id.is_nil() || token.len() != 64 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err("unauthorized");
@@ -308,14 +353,12 @@ impl Core {
         s.input_feature = input_feature;
         s.input_enabled = false;
         s.input_events.clear();
+        s.abort_file();
+        s.files_feature = files_feature;
         Ok(s.connection_epoch)
     }
     pub fn is_authorized_session(&self, id: Uuid, epoch: u64) -> bool {
-        let s = self.state.lock().unwrap();
-        s.connected == Some(id)
-            && s.connection_epoch == epoch
-            && !s.revoked_devices.contains(&id)
-            && s.secrets.devices.iter().any(|d| d.id == id)
+        self.state.lock().unwrap().session_ok(id, epoch)
     }
     #[cfg(test)]
     pub fn is_authorized_connection(&self, id: Uuid) -> bool {
@@ -333,6 +376,7 @@ impl Core {
             s.input_feature = false;
             s.input_enabled = false;
             s.input_events.clear();
+            s.end_file_session();
         }
     }
     pub fn revoke(&self, id: Uuid) -> Result<(), String> {
@@ -363,6 +407,7 @@ impl Core {
             s.input_feature = false;
             s.input_enabled = false;
             s.input_events.clear();
+            s.end_file_session();
             s.revision += 1;
             let _ = self.events.send(Outgoing::Close { device_id: id });
         }
@@ -377,7 +422,7 @@ impl Core {
     pub fn update_settings(&self, new: Settings) -> Result<(), String> {
         self.update_settings_with_io(new, settings::set_autostart, settings::save)
     }
-    fn update_settings_with_io(
+    pub(crate) fn update_settings_with_io(
         &self,
         new: Settings,
         mut set_autostart: impl FnMut(bool) -> Result<(), String>,
@@ -403,6 +448,9 @@ impl Core {
             s.input_enabled = false;
             s.input_events.clear();
         }
+        if !s.settings.allow_files {
+            s.abort_file();
+        }
         s.revision += 1;
         self.publish_state_locked(&s);
         Ok(())
@@ -423,6 +471,10 @@ impl Core {
             input: s.input_feature.then_some(InputState {
                 allowed: s.settings.allow_input,
                 enabled: s.input_enabled,
+            }),
+            files: s.files_feature.then_some(FilesState {
+                allowed: s.settings.allow_files,
+                max_bytes: protocol::MAX_FILE_BYTES,
             }),
         }
     }
@@ -463,6 +515,7 @@ impl Core {
             // Invalidate already queued enable requests as well as input events.
             // Credentials stay valid; reconnection starts a fresh disarmed epoch.
             s.input_feature = false;
+            s.end_file_session();
             s.client_sync = SyncSettings::default();
             s.connection_epoch = s.connection_epoch.wrapping_add(1);
             if let Some(device_id) = s.connected.take() {
@@ -679,6 +732,7 @@ impl Core {
             s.input_feature = false;
             s.input_enabled = false;
             s.input_events.clear();
+            s.end_file_session();
             let _ = self.events.send(Outgoing::Close { device_id });
             drop(s);
             self.diagnostic(
@@ -688,7 +742,7 @@ impl Core {
     }
 }
 
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
@@ -796,8 +850,12 @@ mod tests {
             name: "Test".into(),
             token_hash: secrets::token_hash(&token),
         });
-        let old = core.connect_authenticated(id, &token, false).unwrap();
-        let new = core.connect_authenticated(id, &token, false).unwrap();
+        let old = core
+            .connect_authenticated(id, &token, false, false)
+            .unwrap();
+        let new = core
+            .connect_authenticated(id, &token, false, false)
+            .unwrap();
         core.disconnect(id, old);
         assert!(core.is_authorized_session(id, new));
         assert!(!core.is_authorized_session(id, old));
@@ -813,7 +871,9 @@ mod tests {
             token_hash: secrets::token_hash(&token),
         });
         assert_eq!(core.status().devices[0].last_seen_at, None);
-        let epoch = core.connect_authenticated(id, &token, false).unwrap();
+        let epoch = core
+            .connect_authenticated(id, &token, false, false)
+            .unwrap();
         let connected_at = core.status().devices[0].last_seen_at.unwrap();
         core.disconnect(id, epoch);
         let device = &core.status().devices[0];
@@ -863,13 +923,15 @@ mod tests {
             name: "Resume test".into(),
             token_hash: secrets::token_hash(&token),
         });
-        let epoch = core.connect_authenticated(id, &token, false).unwrap();
+        let epoch = core
+            .connect_authenticated(id, &token, false, false)
+            .unwrap();
         let now = unsafe { windows::Win32::System::SystemInformation::GetTickCount64() };
         core.last_live_tick
             .store(now.saturating_sub(6_000), Ordering::Release);
         core.check_resume();
         assert!(!core.is_authorized_session(id, epoch));
-        assert!(core.connect_authenticated(id, &token, false).is_ok());
+        assert!(core.connect_authenticated(id, &token, false, false).is_ok());
     }
     #[test]
     fn pairing_approval_and_revocation() {
@@ -885,11 +947,17 @@ mod tests {
         let (_, token) = core
             .pair_complete(device, "Android".into(), generation)
             .unwrap();
-        assert!(core.connect_authenticated(device, &token, false).is_ok());
-        assert!(core.connect_authenticated(device, &token, false).is_ok());
+        assert!(core
+            .connect_authenticated(device, &token, false, false)
+            .is_ok());
+        assert!(core
+            .connect_authenticated(device, &token, false, false)
+            .is_ok());
         core.revoke(device).unwrap();
         assert!(!core.is_authorized_connection(device));
-        assert!(core.connect_authenticated(device, &token, false).is_err());
+        assert!(core
+            .connect_authenticated(device, &token, false, false)
+            .is_err());
     }
     #[test]
     fn failed_revocation_closes_session_and_preserves_durable_credentials_for_retry() {
@@ -901,7 +969,7 @@ mod tests {
             name: "Revocation test".into(),
             token_hash: secrets::token_hash(&token),
         });
-        let epoch = core.connect_authenticated(id, &token, true).unwrap();
+        let epoch = core.connect_authenticated(id, &token, true, false).unwrap();
         {
             let mut s = core.state.lock().unwrap();
             s.settings.allow_input = true;
@@ -933,11 +1001,11 @@ mod tests {
         }
         // Disk and RAM retain the old hash, but automatic reconnection is denied.
         assert_eq!(
-            core.connect_authenticated(id, &token, true),
+            core.connect_authenticated(id, &token, true, false),
             Err("unauthorized")
         );
         core.revoke_with_save(id, |_| Ok(())).unwrap();
-        assert!(core.connect_authenticated(id, &token, true).is_err());
+        assert!(core.connect_authenticated(id, &token, true, false).is_err());
     }
     #[test]
     fn settings_failure_restores_autostart_and_keeps_live_preferences() {
@@ -1062,10 +1130,12 @@ mod tests {
             name: "Input test".into(),
             token_hash: secrets::token_hash(&token),
         });
-        let old = core.connect_authenticated(id, &token, false).unwrap();
+        let old = core
+            .connect_authenticated(id, &token, false, false)
+            .unwrap();
         assert!(core.snapshot().input.is_none());
         assert_eq!(core.input_enable(id, old, true), Err("unavailable".into()));
-        let fresh = core.connect_authenticated(id, &token, true).unwrap();
+        let fresh = core.connect_authenticated(id, &token, true, false).unwrap();
         assert!(core.snapshot().input.is_some());
         assert_eq!(
             core.input_enable(id, fresh, true),
@@ -1084,10 +1154,10 @@ mod tests {
             core.input_enable(id, fresh, true),
             Err("unauthorized".into())
         );
-        let fresh = core.connect_authenticated(id, &token, true).unwrap();
+        let fresh = core.connect_authenticated(id, &token, true, false).unwrap();
         assert!(!core.input_active(id, fresh));
         core.input_enable(id, fresh, true).unwrap();
-        let replacement = core.connect_authenticated(id, &token, true).unwrap();
+        let replacement = core.connect_authenticated(id, &token, true, false).unwrap();
         assert!(!core.input_active(id, replacement));
         assert_eq!(
             core.input_enable(id, fresh, true),
