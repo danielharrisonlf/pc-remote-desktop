@@ -149,6 +149,27 @@
         "kind": "keyboard.key",
         "key": "enter"
       }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf690",
+      "action": {
+        "kind": "file.offer",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01",
+        "name": "IMG_0001.jpg",
+        "size": 123456,
+        "mime": "image/jpeg"
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf691",
+      "action": {
+        "kind": "file.cancel",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01"
+      }
     }
   ],
   "server": [
@@ -285,6 +306,93 @@
         "allowed": true,
         "enabled": false
       }
+    },
+    {
+      "v": 1,
+      "type": "welcome",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf632",
+      "pcId": "36c7f5c2-9a39-43a5-a541-082f745dfd01",
+      "pcName": "PC de teste",
+      "capabilities": [
+        "audio",
+        "media",
+        "clipboard.text",
+        "input.control",
+        "file.transfer"
+      ]
+    },
+    {
+      "v": 1,
+      "type": "state",
+      "revision": 1,
+      "audio": {
+        "available": true,
+        "percent": 35,
+        "muted": false,
+        "error": null
+      },
+      "media": {
+        "sessions": [
+          {
+            "id": "session-1",
+            "app": "player-id",
+            "title": "Título",
+            "playing": true,
+            "capabilities": {
+              "play": true,
+              "pause": true,
+              "previous": false,
+              "next": false,
+              "seek": true
+            },
+            "positionSeconds": 20
+          }
+        ]
+      },
+      "clipboardRevision": 0,
+      "sync": {
+        "upload": false,
+        "download": false,
+        "paused": false
+      },
+      "input": {
+        "allowed": true,
+        "enabled": false
+      },
+      "files": {
+        "allowed": true,
+        "maxBytes": 52428800
+      }
+    },
+    {
+      "v": 1,
+      "type": "file.ticket",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf690",
+      "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01",
+      "ticket": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+      "chunkBytes": 65536,
+      "windowBytes": 1048576
+    },
+    {
+      "v": 1,
+      "type": "ack",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf690"
+    },
+    {
+      "v": 1,
+      "type": "error",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf690",
+      "code": "file_busy",
+      "message": "Outro arquivo está sendo recebido",
+      "retryable": true
+    },
+    {
+      "v": 1,
+      "type": "error",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf690",
+      "code": "too_large",
+      "message": "Arquivo excede 50 MB",
+      "retryable": false
     }
   ],
   "invalidClient": [
@@ -392,6 +500,151 @@
         "kind": "keyboard.text",
         "text": ""
       }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf790",
+      "action": {
+        "kind": "file.offer",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01",
+        "name": "foto.png",
+        "size": 10,
+        "mime": "image/jpeg"
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf791",
+      "action": {
+        "kind": "file.offer",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01",
+        "name": "documento.exe",
+        "size": 10,
+        "mime": "application/pdf"
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf792",
+      "action": {
+        "kind": "file.offer",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01",
+        "name": "foto.png",
+        "size": 0,
+        "mime": "image/png"
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf793",
+      "action": {
+        "kind": "file.offer",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01",
+        "name": "foto.png",
+        "size": 52428801,
+        "mime": "image/png"
+      }
+    },
+    {
+      "v": 1,
+      "type": "request",
+      "id": "a44a8701-91d6-4497-8eb5-9300a18bf794",
+      "action": {
+        "kind": "file.offer",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01",
+        "name": "foto.png",
+        "size": 10,
+        "mime": "image/png",
+        "path": "C:\\Windows"
+      }
     }
-  ]
+  ],
+  "fileSocket": {
+    "client": [
+      {
+        "v": 1,
+        "type": "file.begin",
+        "id": "b55b9812-02e7-45a8-9fc6-0411b29cf701",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01",
+        "ticket": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00"
+      },
+      {
+        "v": 1,
+        "type": "file.end",
+        "id": "b55b9812-02e7-45a8-9fc6-0411b29cf702",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01",
+        "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+      }
+    ],
+    "server": [
+      {
+        "v": 1,
+        "type": "file.accept",
+        "id": "b55b9812-02e7-45a8-9fc6-0411b29cf701",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01"
+      },
+      {
+        "v": 1,
+        "type": "file.progress",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01",
+        "received": 262144
+      },
+      {
+        "v": 1,
+        "type": "file.progress",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01",
+        "received": 123456
+      },
+      {
+        "v": 1,
+        "type": "file.done",
+        "id": "b55b9812-02e7-45a8-9fc6-0411b29cf702",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01",
+        "name": "IMG_0001 (1).jpg"
+      },
+      {
+        "v": 1,
+        "type": "error",
+        "id": "b55b9812-02e7-45a8-9fc6-0411b29cf701",
+        "code": "unauthorized",
+        "message": "Dispositivo sem autorização",
+        "retryable": false
+      },
+      {
+        "v": 1,
+        "type": "error",
+        "id": "b55b9812-02e7-45a8-9fc6-0411b29cf702",
+        "code": "file_integrity",
+        "message": "Arquivo corrompido durante o envio",
+        "retryable": true
+      }
+    ],
+    "invalidClient": [
+      {
+        "v": 1,
+        "type": "file.begin",
+        "id": "b55b9812-02e7-45a8-9fc6-0411b29cf703",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01",
+        "ticket": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "name": "outro.png"
+      },
+      {
+        "v": 1,
+        "type": "file.end",
+        "id": "b55b9812-02e7-45a8-9fc6-0411b29cf704",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01"
+      },
+      {
+        "v": 1,
+        "type": "file.chunk",
+        "id": "b55b9812-02e7-45a8-9fc6-0411b29cf705",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e01",
+        "data": "AAAA"
+      }
+    ]
+  }
 }

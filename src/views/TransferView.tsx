@@ -1,11 +1,11 @@
-import { ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, Hand, History, Monitor, MousePointer2, Pause, Play, Smartphone } from 'lucide-react';
+import { ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, FileImage, FileText, FolderOpen, Hand, History, Monitor, MousePointer2, Pause, Play, Smartphone } from 'lucide-react';
 import { desktopApi } from '../api';
 import { Button } from '../components/Button';
 import { SettingSwitch } from '../components/Switch';
 import { cx } from '../lib/cx';
-import { formatClock, plural } from '../lib/format';
-import type { Settings, TransferEntry } from '../types';
-import { clipboardSummary } from './summaries';
+import { formatBytes, formatClock, plural } from '../lib/format';
+import type { IncomingFile, ReceivedFile, Settings, TransferEntry } from '../types';
+import { clipboardSummary, fileProgress, filesSummary } from './summaries';
 import type { ViewProps } from './viewProps';
 
 function SyncFlow({ settings }: { settings: Settings }) {
@@ -57,12 +57,59 @@ function TransferRow({ entry }: { entry: TransferEntry }) {
   );
 }
 
+function ReceivedRow({ file }: { file: ReceivedFile }) {
+  const Icon = /\.pdf$/i.test(file.name) ? FileText : FileImage;
+  return (
+    <li className="transfer-row">
+      <span className="transfer-icon is-in" aria-hidden>
+        <Icon />
+      </span>
+      <span className="transfer-text">
+        <span className="transfer-title is-file" title={file.name}>
+          {file.name}
+        </span>
+        <span className="transfer-meta tabular">{formatBytes(file.bytes)}</span>
+      </span>
+      <time className="transfer-time tabular" dateTime={new Date(file.at).toISOString()}>
+        {formatClock(file.at, true)}
+      </time>
+    </li>
+  );
+}
+
+function IncomingRow({ file }: { file: IncomingFile }) {
+  const progress = fileProgress(file);
+  return (
+    <div className="incoming-file">
+      <div className="incoming-head">
+        <span className="incoming-name" title={file.name}>
+          {file.name}
+        </span>
+        <span className="incoming-meta tabular">
+          {formatBytes(file.received) || '0 B'} de {formatBytes(file.bytes)}
+        </span>
+      </div>
+      <div
+        className="progress-track"
+        role="progressbar"
+        aria-label={`Recebendo ${file.name}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(progress * 100)}
+      >
+        <span style={{ transform: `scaleX(${progress})` }} />
+      </div>
+    </div>
+  );
+}
+
 export function TransferView({ status, settings, changeSettings, run, isBusy }: ViewProps) {
   const inputBadge = status.inputActive
     ? { tone: 'badge-success', text: 'Em uso' }
     : settings.allowInput
       ? { tone: 'badge-accent', text: 'Liberado' }
       : { tone: 'badge-neutral', text: 'Bloqueado' };
+  const filesTone = status.incomingFile ? 'badge-success' : settings.allowFiles ? 'badge-accent' : 'badge-neutral';
 
   return (
     <div className="view">
@@ -115,6 +162,54 @@ export function TransferView({ status, settings, changeSettings, run, isBusy }: 
           )}
           <p className="card-footnote">O texto copiado não é salvo.</p>
         </div>
+      </section>
+
+      <section className="card" aria-labelledby="files-title">
+        <header className="card-header">
+          <h2 id="files-title" className="card-title">
+            Arquivos do celular
+          </h2>
+          <span className={cx('badge', filesTone)}>{filesSummary(settings, status.incomingFile)}</span>
+        </header>
+        <div className="setting-list">
+          <SettingSwitch
+            icon={FileImage}
+            label="Receber imagens e PDFs do celular"
+            checked={settings.allowFiles}
+            onChange={allowFiles => changeSettings({ allowFiles })}
+          />
+        </div>
+        {status.incomingFile ? <IncomingRow file={status.incomingFile} /> : null}
+        <div className="subsection">
+          <div className="subsection-header">
+            <h3 className="subsection-title">
+              <History aria-hidden />
+              Últimos arquivos
+            </h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={FolderOpen}
+              loading={isBusy('openFolder')}
+              onClick={() => void run('openFolder', desktopApi.openReceivedFolder)}
+            >
+              Abrir pasta
+            </Button>
+          </div>
+          {status.receivedFiles.length > 0 ? (
+            <ul className="transfer-list">
+              {status.receivedFiles.map((file, index) => (
+                <ReceivedRow key={`${index}-${file.at}`} file={file} />
+              ))}
+            </ul>
+          ) : (
+            <p className="muted subsection-empty">Nenhum arquivo recebido ainda.</p>
+          )}
+        </div>
+        <ul className="notes">
+          <li>Somente PNG, JPG e PDF de até 50 MB.</li>
+          <li>Os arquivos são salvos em Downloads\PC Remote e marcados como vindos da internet.</li>
+        </ul>
       </section>
 
       <section className="card" aria-labelledby="input-title">

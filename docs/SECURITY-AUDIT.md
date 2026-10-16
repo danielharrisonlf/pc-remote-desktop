@@ -29,4 +29,18 @@ No grafo Rust permanecem avisos de manutenção: [proc-macro-error 1.0.4](https:
 - Clipboard Windows confere a sequência sob OpenClipboard antes de uma escrita automática; uma alteração local pendente é preservada.
 - Nenhum conteúdo de clipboard ou credencial foi incluído nos relatórios de testes. Consultas OSV enviaram somente nomes e versões de crates públicas.
 
+## Recebimento de imagens e PDFs (files.v1) — 16/10/2026
+
+Modelo de ameaças considerado: outro aparelho na LAN, celular pareado com cliente defeituoso ou malicioso e nome/conteúdo hostil vindo do celular.
+
+- **Desligado por padrão.** `allowFiles` não existe em preferências antigas e começa falso; desligá-lo aborta a transferência em curso. Clientes sem files.v1 não veem capacidade nem campo novo.
+- **Ticket.** O socket `/v1/files` não aceita credencial própria: só um ticket de 32 bytes aleatórios emitido pela sessão de controle autenticada, válido por 30 s, de uso único, comparado em tempo constante e ligado a dispositivo, epoch, transferId, nome, tamanho e MIME. Qualquer `file.begin` que cite o transferId consome o ticket, mesmo com segredo errado, o que impede tentativas repetidas. Fim, troca ou revogação da sessão invalidam ticket e transferência; a autorização é conferida a cada frame.
+- **Limites.** No máximo um ticket ou envio por PC, 50 MiB por arquivo, frames de 64 KiB, texto de 4 KiB, 10 s para `file.begin`, 20 s sem frames, 15 min por envio, fila de 16 blocos até o disco e espaço livre mínimo de tamanho + 64 MiB. Bytes além do declarado são recusados imediatamente.
+- **Tipo e integridade.** Só PNG, JPEG e PDF, com MIME, extensão e assinatura coerentes, e SHA-256 conferido antes de qualquer nome visível. A assinatura não prova que o arquivo é inofensivo: PDFs e imagens ainda são abertos por leitores do Windows.
+- **Mark-of-the-Web.** Todo arquivo salvo recebe `Zone.Identifier` com ZoneId=3, para que SmartScreen, Office e leitores tratem o arquivo como vindo da internet. Se o volume não suportar fluxos alternativos (por exemplo FAT32), o envio falha com `storage` em vez de salvar sem a marca.
+- **Sem sobrescrita nem fuga de pasta.** O nome é reduzido ao último componente e sanitizado (caracteres proibidos, controles, marcas bidirecionais, nomes de dispositivo reservados, pontos/espaços finais, 100 caracteres). A parte é criada com `create_new`; o nome final usa `MoveFileExW` sem `MOVEFILE_REPLACE_EXISTING` (nunca `std::fs::rename`, que substitui no Windows). A pasta `Downloads\PC Remote` é recusada se for link simbólico, junção ou outro reparse point.
+- **Privacidade.** O painel guarda só nome, tamanho e horário dos últimos 12 arquivos, em RAM. Diagnósticos de falha não incluem conteúdo, nome do arquivo nem caminho completo.
+
+Limites conhecidos: um processo local com os mesmos privilégios do usuário pode trocar a pasta entre a verificação e a gravação; isso não amplia o acesso desse processo. A abertura do arquivo continua sendo uma decisão do usuário; nada é executado ou aberto automaticamente.
+
 APKs continuam assinados com chave debug de avaliação; o instalador Windows não possui Authenticode. Assinatura de produção, testes físicos/OEM, leitura óptica de QR e revisão externa de segurança permanecem pendentes. Consulte [testes](TESTING.md) e [revisão de bugs](BUG-AUDIT-2026-10-15.md).

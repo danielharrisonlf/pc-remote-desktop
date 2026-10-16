@@ -4,7 +4,7 @@ O controle usa Views nativas no Android e `SendInput` da crate windows no Rust. 
 
 ## Permissão e alvo
 
-Permissão `allowInput` começa falsa no Windows. Ativação da sessão exige outra ação no Android, sempre perdida ao reconectar ou retomar após segundo plano. Use a ação da bandeja para interromper rapidamente. Essa ação invalida a conexão atual para descartar inclusive pedidos de ativação já em trânsito; o Android reconecta desarmado e exige nova ativação. Não existem estados de botão ou tecla presos entre requests.
+Permissão `allowInput` começa falsa no Windows. Ativação da sessão exige outra ação no Android (**Ativar touchpad**) e é perdida ao reconectar. Em segundo plano ou sem foco, o Android 0.4.0 desarma o PC na hora e pede a ativação de novo ao voltar, na mesma conexão; versões anteriores exigem ativar outra vez. Use a ação da bandeja para interromper rapidamente. Essa ação invalida a conexão atual para descartar inclusive pedidos de ativação já em trânsito; o Android reconecta desarmado e exige nova ativação. Não existem estados de botão ou tecla presos entre requests.
 
 Texto e teclas vão ao aplicativo atualmente em foco no Windows. Isso é um teclado remoto: um Enter explícito pode confirmar uma ação na janela escolhida. Selecione e confira a janela antes de digitar. Este controle não fornece imagem da tela, seleção de alvo por aplicativo nem modo de arrastar com botão mantido.
 

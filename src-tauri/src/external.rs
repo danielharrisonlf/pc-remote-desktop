@@ -30,17 +30,30 @@ pub fn validate(url: &str) -> Result<(), String> {
 
 pub fn open(url: &str) -> Result<(), String> {
     validate(url)?;
+    shell_open(&windows::core::HSTRING::from(url))
+        .map_err(|()| "Não foi possível abrir o navegador padrão.".into())
+}
+
+/// Opens a directory in Explorer. The caller passes the app's own received-files folder.
+pub fn open_folder(folder: &std::path::Path) -> Result<(), String> {
+    if !folder.is_dir() {
+        return Err("Pasta não encontrada.".into());
+    }
+    shell_open(&windows::core::HSTRING::from(folder))
+        .map_err(|()| "Não foi possível abrir a pasta no Explorador.".into())
+}
+
+fn shell_open(target: &windows::core::HSTRING) -> Result<(), ()> {
     use windows::core::{HSTRING, PCWSTR};
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     let operation = HSTRING::from("open");
-    let target = HSTRING::from(url);
     // ShellExecute returns a value greater than 32 on success.
     let result = unsafe {
         ShellExecuteW(
             None,
             &operation,
-            &target,
+            target,
             PCWSTR::null(),
             PCWSTR::null(),
             SW_SHOWNORMAL,
@@ -49,7 +62,7 @@ pub fn open(url: &str) -> Result<(), String> {
     if result.0 as isize > 32 {
         Ok(())
     } else {
-        Err("Não foi possível abrir o navegador padrão.".into())
+        Err(())
     }
 }
 

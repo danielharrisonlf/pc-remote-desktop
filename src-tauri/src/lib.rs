@@ -3,6 +3,7 @@ mod clipboard;
 mod connection;
 mod core;
 mod external;
+mod files;
 mod input;
 mod media;
 mod pairing;
@@ -17,6 +18,7 @@ use tauri::{
     tray::TrayIconBuilder,
     Manager,
 };
+use tauri_plugin_notification::NotificationExt;
 
 #[tauri::command]
 fn get_status(core: tauri::State<'_, Arc<Core>>) -> Status {
@@ -53,6 +55,13 @@ fn stop_input(core: tauri::State<'_, Arc<Core>>) {
 fn open_url(url: String) -> Result<(), String> {
     external::open(&url)
 }
+#[tauri::command]
+fn open_received_folder(core: tauri::State<'_, Arc<Core>>) -> Result<(), String> {
+    let folder = core
+        .received_folder()
+        .map_err(|error| format!("Não foi possível abrir Downloads\\PC Remote: {error}"))?;
+    external::open_folder(&folder)
+}
 
 pub fn run() {
     tauri::Builder::default()
@@ -62,6 +71,7 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             get_status,
             start_pairing,
@@ -69,7 +79,8 @@ pub fn run() {
             revoke_device,
             update_settings,
             stop_input,
-            open_url
+            open_url,
+            open_received_folder
         ])
         .setup(|app| {
             let identity =
@@ -78,6 +89,16 @@ pub fn run() {
                 connection::tls_config(&identity.certificate_pem, &identity.private_key_pem)
                     .expect("Certificado local inválido");
             let core = Core::new(identity, fingerprint);
+            let handle = app.handle().clone();
+            // Installed builds use the bundle identifier as AUMID; dev builds fall back.
+            core.set_notifier(Box::new(move |title, body| {
+                let _ = handle
+                    .notification()
+                    .builder()
+                    .title(title)
+                    .body(body)
+                    .show();
+            }));
             let server = core.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = connection::serve(server.clone(), tls).await {

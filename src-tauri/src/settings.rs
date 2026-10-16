@@ -9,6 +9,8 @@ pub struct Settings {
     pub autostart: bool,
     #[serde(rename = "allowInput", default)]
     pub allow_input: bool,
+    #[serde(rename = "allowFiles", default)]
+    pub allow_files: bool,
 }
 
 fn path() -> Result<PathBuf, String> {
@@ -66,14 +68,23 @@ mod tests {
     use super::Settings;
 
     #[test]
-    fn legacy_preferences_never_grant_remote_input() {
+    fn legacy_preferences_never_grant_remote_input_or_files() {
         let settings: Settings = serde_json::from_str(
             r#"{"upload":true,"download":false,"paused":false,"autostart":false}"#,
         )
         .unwrap();
         assert!(!settings.allow_input);
+        assert!(!settings.allow_files);
         assert!(settings.upload);
         let current = serde_json::to_value(&settings).unwrap();
         assert_eq!(current["allowInput"], false);
+        assert_eq!(current["allowFiles"], false);
+        // 0.2.x/0.3.0 files with input already granted still keep files blocked.
+        let input_only: Settings = serde_json::from_str(
+            r#"{"upload":false,"download":false,"paused":false,"autostart":false,"allowInput":true}"#,
+        )
+        .unwrap();
+        assert!(input_only.allow_input);
+        assert!(!input_only.allow_files);
     }
 }
