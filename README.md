@@ -1,17 +1,17 @@
 # PC Remote Desktop
 
-Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositório Windows independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.5.0, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md), [validação](docs/TESTING.md) e [como publicar uma versão](docs/RELEASE.md).
+Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositório Windows independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.6.0, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md), [validação](docs/TESTING.md) e [como publicar uma versão](docs/RELEASE.md).
 
-## Baixar e instalar — Windows 0.5.0
+## Baixar e instalar — Windows 0.6.0
 
 | Aplicativo | Download |
 |---|---|
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.5.0/pc-remote-desktop-0.5.0-x64-setup.exe) |
-| Android — APK universal | [Baixar APK 0.4.0](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.4.0-kotlin/pc-remote-android-kotlin-0.4.0-evaluation.apk) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.0/pc-remote-desktop-0.6.0-x64-setup.exe) |
+| Android — APK universal | [Baixar APK 0.6.0](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.0-kotlin/pc-remote-android-kotlin-0.6.0-evaluation.apk) |
 
-As Releases dos dois repositórios são públicas. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.5.0) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.4.0-kotlin) também incluem os hashes SHA-256.
+As Releases dos dois repositórios são públicas. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.0) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.0-kotlin) também incluem os hashes SHA-256.
 
-Instale o `.exe` no Windows e abra o PC Remote pela bandeja. **Quem já usa a 0.4.0 ou anterior instala a 0.5.0 manualmente uma vez**, por cima da instalação atual (mantenha a opção padrão da página do instalador e não marque a exclusão dos dados); pareamentos e configurações são mantidos. Da 0.5.0 em diante as atualizações chegam pelo próprio app (veja [Atualizações](#atualizações)). No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
+Instale o `.exe` no Windows e abra o PC Remote pela bandeja. **Quem usa a 0.5.0 recebe a 0.6.0 pelo próprio app** (veja [Atualizações](#atualizações)); quem usa a 0.4.0 ou anterior instala manualmente uma vez, por cima da instalação atual (mantenha a opção padrão da página do instalador e não marque a exclusão dos dados). Pareamentos e configurações são mantidos. No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
 
 Esta é uma versão de avaliação: APK assinado com chave debug e instalador sem Authenticode. A validação em celular físico e players reais permanece pendente; consulte [testes e limitações](docs/TESTING.md).
 
@@ -46,8 +46,8 @@ O instalador fica em `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/` (
 1. Conecte os dois aparelhos à mesma LAN. Abra o painel na bandeja e inicie o pareamento.
 2. No Android, digite o código de 8 dígitos e escolha o PC encontrado na rede, ou leia o QR. Com o código, o celular mostra uma faixa de cores que deve ser igual à exibida no PC.
 3. Confirme o pedido e o nome do celular no Windows. O código expira em 120 segundos.
-4. Volume e mídia ficam disponíveis conforme o estado e as capacidades reais. Para remover acesso, revogue o dispositivo no painel.
-5. Use **Enviar para o PC** / **Copiar do PC** no Android. Para sincronizar automaticamente, ative as direções desejadas **em ambos os aplicativos**. Elas começam desligadas.
+4. Pronto: touchpad, volume, mídia, arquivos e área de transferência funcionam sem ligar nada. Volume e mídia seguem as capacidades reais de cada player; o celular controla primeiro o player que o Windows trata como atual e pode abrir pesquisas do YouTube no navegador padrão do PC. Para remover acesso, revogue o dispositivo no painel.
+5. A área de transferência sincroniza em tempo real nos dois sentidos. Para parar, desligue **Sincronização em tempo real** no painel, na bandeja ou no celular; enviar texto e arquivos continua manual.
 
 Se a rede bloquear a descoberta (mDNS), use o QR. A descoberta não prova identidade: no pareamento por código, compare as cores antes de permitir. Após reinstalar ou apagar a identidade do PC, remova o pareamento antigo e pareie novamente.
 
@@ -70,21 +70,20 @@ Veja [testes e pendências](docs/TESTING.md) antes de considerar a build validad
 
 ## Touchpad e teclado remoto
 
-1. No Windows, abra **Transferência** (ou **Controles rápidos** na Visão geral) e ligue **Permitir mouse e teclado pelo celular**. A opção começa desligada.
-2. No Android, em **Mouse e teclado**, toque em **Ativar controle** nesta conexão.
-3. Deslize no touchpad para mover o cursor e toque para clicar. Os botões abaixo oferecem clique direito, duplo clique, rolagem e as teclas comuns. Digite no campo de texto e toque em **Digitar**.
-4. O alvo é o aplicativo em foco no Windows. Selecione a janela desejada antes de enviar texto. O controle não exibe a tela do PC.
-5. Para interromper, toque em **Desligar** no celular, use **Interromper** em Transferência ou na Visão geral do Windows, ou o menu da bandeja. Bloquear a permissão no PC também interrompe o controle.
+1. Depois do pareamento o touchpad do celular já fica pronto; não há chave para ligar no PC.
+2. Deslize no touchpad para mover o cursor e toque para clicar. Os botões abaixo oferecem clique direito, duplo clique, rolagem e as teclas comuns. Digite no campo de texto e toque em **Digitar**.
+3. O alvo é o aplicativo em foco no Windows. Selecione a janela desejada antes de enviar texto. O controle não exibe a tela do PC.
+4. Para parar, toque em **Desligar** no celular. No PC, **Interromper** (em Transferência, na Visão geral ou na bandeja) desarma na hora e **bloqueia** o mouse e o teclado do celular, mesmo depois de reconectar ou reiniciar, até você clicar em **Liberar**. A conexão continua para mídia, arquivos e área de transferência.
 
-A ativação vale para a conexão: trocar de aba no Android não a desliga. Em segundo plano ou sem foco, o Android desarma o PC na hora e reativa sozinho ao voltar, na mesma conexão. Desconectar, **Desligar** ou bloquear no PC exigem ativar novamente; movimentos, cliques e textos pendentes não são repetidos. Texto digitado fica somente em RAM e não entra em logs/histórico. O limite por envio é **1.024 bytes UTF-8**, sem caracteres de controle; use os botões Enter e Tab para essas teclas. Aplicativos elevados, tela de bloqueio/UAC e algumas interfaces podem recusar entrada. Teclas físicas pressionadas no PC podem interferir. Veja [INPUT.md](docs/INPUT.md) para detalhes e validações.
+A ativação vale para a conexão: trocar de aba no Android não a desliga. Em segundo plano ou sem foco, o Android desarma o PC na hora e reativa sozinho ao voltar, na mesma conexão. Numa conexão nova o celular arma sozinho, exceto depois de **Desligar** no celular ou com o bloqueio do PC; movimentos, cliques e textos pendentes não são repetidos. Texto digitado fica somente em RAM e não entra em logs/histórico. O limite por envio é **1.024 bytes UTF-8**, sem caracteres de controle; use os botões Enter e Tab para essas teclas. Aplicativos elevados, tela de bloqueio/UAC e algumas interfaces podem recusar entrada. Teclas físicas pressionadas no PC podem interferir. Veja [INPUT.md](docs/INPUT.md) para detalhes e validações.
 
-## Imagens e PDFs do celular
+## Arquivos nos dois sentidos
 
-1. No Windows, abra **Transferência** e ligue **Receber imagens e PDFs do celular** no cartão **Arquivos do celular**. A opção começa desligada.
-2. No Android, escolha os arquivos no aplicativo ou use **Compartilhar** em outro app. São aceitos PNG, JPG e PDF de até 50 MB, um de cada vez.
-3. O PC salva em **Downloads\PC Remote**, nunca sobrescreve um arquivo existente (acrescenta `(1)`, `(2)`…) e marca cada arquivo como vindo da internet. Uma notificação do Windows avisa quando o arquivo chega; **Abrir pasta** mostra a pasta.
+1. **Do celular para o PC:** no Android, escolha os arquivos em **Transferir** ou use **Compartilhar** em outro app. Qualquer tipo de até 1 GB, vários de uma vez (um por vez na fila). O PC salva em **Downloads\PC Remote**, nunca sobrescreve (acrescenta `(1)`, `(2)`…) e marca cada arquivo como vindo da internet, para o SmartScreen avisar antes de rodar um programa recebido. Atalhos e arquivos que o Explorador executa só por listar a pasta (`.lnk`, `.url`, `.scf`, `.library-ms`, `desktop.ini` e similares) são recusados.
+2. **Do PC para o celular:** clique em **Enviar arquivos ao celular** (Visão geral ou Transferência) ou arraste arquivos para a janela do PC Remote. Até 20 na fila, cada um de até 1 GB; eles esperam o celular conectar. O celular salva em **Download/PC Remote**.
+3. O progresso aparece nos dois aparelhos e dá para cancelar dos dois lados. Uma notificação avisa quando o arquivo chega; **Abrir pasta** mostra a pasta do PC.
 
-O envio usa uma conexão separada autorizada por um ticket de uso único da sessão já pareada. Nome, tipo, tamanho e SHA-256 são conferidos antes de salvar; envios interrompidos são descartados. Desligar a opção no PC interrompe o envio em andamento. O painel guarda apenas nome, tamanho e horário dos últimos 12 arquivos, em RAM. Requer PC e Android com a extensão files.v1; versões anteriores continuam funcionando sem ela.
+Cada envio usa uma conexão separada autorizada por um ticket de uso único da sessão já pareada; tamanho e SHA-256 são conferidos antes de salvar, e envios interrompidos são descartados. Os arquivos vão em blocos de 64 KiB, então a memória não cresce com o tamanho, e o PC não entra em suspensão durante a transferência. O painel guarda apenas nome, tamanho e horário dos últimos 12 arquivos, em RAM. Celulares 0.4 e 0.5 continuam enviando PNG, JPG e PDF de até 50 MB.
 
 ## Atualizações
 
