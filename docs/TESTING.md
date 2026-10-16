@@ -2,6 +2,23 @@
 
 O código contém integrações nativas reais. Testes unitários não comprovam compatibilidade de cada player, permissões do Android nem continuidade durante suspensão. Este registro distingue execução automatizada, execução no Windows deste ambiente e validações pendentes em Android físico.
 
+## Atualização 0.5.0 — atualização pelo app, 16/10/2026
+
+### Testes automatizados
+
+- Rust/MSVC (`cargo test --target x86_64-pc-windows-msvc`, ambiente de `.tools/env.ps1`): **57 testes da biblioteca e 5 de integração passaram**; ignorados por padrão: os 4 smokes nativos e o teste de artefatos reais. `cargo fmt --check` passou.
+- `tests/updater.rs` usa um app `MockRuntime` configurado como o `tauri.conf.json` e um servidor HTTP em `127.0.0.1`, com fixtures assinadas pela CLI do Tauri (chave descartável): 0.5.1 encontrada, baixada com eventos `started`/`progress`/`finished` e verificada; bytes adulterados recusados sem guardar nada; manifesto que anuncia 0.6.0 para a assinatura da 0.5.1 recusado; assinatura sem versão e assinatura inválida recusadas; mesma versão, versão antiga e 404 não viram atualização; nova checagem mantém o download só para a mesma versão; instalador já baixado não é liberado se a versão em uso não for menor.
+- Testes de unidade em `update.rs`: comparação semver, mensagens de erro, override de endpoint só em debug e formato dos eventos.
+- `npx tsc --noEmit` passou; `npm test`: **35 testes Vitest passaram** (5 arquivos), incluindo a máquina de estados do painel (verificação, download, assinatura, pronta, instalação, repetir a etapa que falhou), a agenda automática (início, intervalo, nova tentativa em 15 min), textos e links permitidos, e o script de release (verificação minisign da assinatura da CLI, adulteração, outra chave, comentário confiável alterado, `latest.json`, cópia renomeada byte a byte, recusa de outra versão e de arquivo que não é executável, versões sincronizadas).
+
+### Build assinada e atualizador
+
+- `npm run tauri build -- --target x86_64-pc-windows-msvc` com `TAURI_SIGNING_PRIVATE_KEY`: instalador NSIS de **4.253.443 bytes** e `.sig` com `version:0.5.0` no comentário confiável. O executável informa 0.5.0. `npm run release:updater` conferiu a assinatura com a `pubkey` de `tauri.conf.json` e gerou `latest.json` e `WINDOWS-SHA256SUMS-0.5.0.txt`.
+- Teste de artefatos reais (`--ignored`), com o verificador do plugin e as configurações reais: o 0.5.0 e um 0.5.1 descartável (mesma chave, `--config` só com a versão) foram encontrados por `PCREMOTE_UPDATE_ENDPOINT`, baixados e verificados; cópias com um byte trocado foram recusadas. O verificador Node do script também recusou o 0.5.0 adulterado.
+- Build sem a chave com `{ "bundle": { "createUpdaterArtifacts": false } }` (caminho do CI e de testes locais) gerou o instalador sem `.sig`.
+- Painel conferido em capturas do frontend com IPC simulado (Edge headless, temas claro e escuro): disponível com **Baixar e instalar**, baixando com barra e porcentagem no cabeçalho, **Atualização pronta** com **Reiniciar para atualizar**, erros de verificação, download e instalação com **Tentar de novo** e link da release, e o diálogo do cabeçalho.
+- **Não testado:** a instalação NSIS em `/P /UPDATE /R`, o fechamento do app pelo próprio atualizador e a reabertura, porque substituiriam a instalação 0.4.0 em uso; a consulta ao `latest.json` publicado no GitHub (a release 0.5.0 ainda não existe); o executável de debug com `PCREMOTE_UPDATE_ENDPOINT`, que sai na hora por causa do Single Instance enquanto o PC Remote instalado está aberto (o mesmo caminho foi exercitado pelo teste de integração); proxy corporativo.
+
 ## Atualização 0.4.0 — arquivos do celular (files.v1) e faixa de cores só no pareamento, 16/10/2026
 
 ### Ponta a ponta com o Android 0.4.0-kotlin
