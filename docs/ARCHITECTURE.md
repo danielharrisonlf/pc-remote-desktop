@@ -1,12 +1,12 @@
-# Arquitetura 0.1.0
+# Arquitetura
 
 Dois repositórios e builds independentes. A única interface entre os aplicativos é [protocolo 1](PROTOCOL.md), cuja cópia deve ser mantida idêntica em ambos. Não há código compartilhado por caminhos relativos entre repositórios.
 
 ## Android
 
-React Native New Architecture, componentes funcionais/hooks e TypeScript estrito. Telas mostram controle, clipboard e configurações. Estado de conexão/sessões e o transporte vivem fora de telas. Slider possui estado local durante arraste, frequência máxima de 10 comandos/s e envio final garantido; confirmações determinam quando snapshots voltam a prevalecer. Capacidades do snapshot governam disponibilidade e explicações dos controles, e o servidor as revalida.
+Kotlin com Views nativas, sem Compose nem React Native. Quatro abas (Touchpad, Mídia, Transferir, Conexão); estado de conexão/sessões e o transporte vivem num cliente da Application, fora das telas. O slider de volume tem estado local durante o arraste, no máximo 10 comandos/s e envio final garantido; confirmações determinam quando snapshots voltam a prevalecer. Capacidades do snapshot governam a disponibilidade dos controles, e o servidor as revalida.
 
-Kotlin integra OkHttp com trust manager específico para o certificado do PC, Android Keystore/AES-GCM em CredentialStore, NsdManager, ClipboardManager, ACTION_SEND, QR e notificações. O cliente usa hostname TLS canônico pc-remote.local, validado normalmente contra o SAN; um Dns exclusivo direciona esse nome ao IPv4 selecionado, mantendo o pin DER. Credencial é lida nativamente para autenticar, sem AsyncStorage. Apenas texto e metadados de UI atravessam o módulo. Observação do clipboard depende de foco real, com baseline novo ao retomar e habilitar. O ciclo de vida interrompe sincronização e impede replay de comandos. Não há garantia de conexão durante suspensão nem timers JS como infraestrutura de segundo plano.
+O cliente integra OkHttp com trust manager específico para o certificado do PC, Android Keystore/AES-GCM em CredentialStore, NsdManager, ClipboardManager, ACTION_SEND, QR e notificações. O cliente usa hostname TLS canônico pc-remote.local, validado normalmente contra o SAN; um Dns exclusivo direciona esse nome ao IPv4 selecionado, mantendo o pin DER. Observação do clipboard depende de foco real, com baseline novo ao retomar e habilitar. O ciclo de vida interrompe sincronização e impede replay de comandos. Não há garantia de conexão durante suspensão.
 
 ## Windows
 
@@ -24,7 +24,6 @@ Futuras ações devem adicionar um tipo validado, autorização, capacidade anun
 
 ## Fontes oficiais
 
-- [React Native New Architecture](https://reactnative.dev/architecture/landing-page)
 - [Android clipboard em segundo plano](https://developer.android.com/about/versions/10/privacy/changes#clipboard-data)
 - [Android clipboard sensível](https://developer.android.com/privacy-and-security/risks/secure-clipboard-handling)
 - [OkHttp pinning](https://square.github.io/okhttp/features/https/)

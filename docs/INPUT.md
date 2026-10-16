@@ -1,6 +1,6 @@
 # Mouse e teclado — input.v1
 
-O controle usa componentes nativos React Native no Android e `SendInput` da crate windows no Rust. Não exige novas bibliotecas Android, acessibilidade, root nem permissões de administrador no PC. A conexão conserva o TLS e as credenciais individuais do pareamento.
+O controle usa Views nativas no Android e `SendInput` da crate windows no Rust. Não exige novas bibliotecas Android, acessibilidade, root nem permissões de administrador no PC. A conexão conserva o TLS e as credenciais individuais do pareamento.
 
 ## Permissão e alvo
 

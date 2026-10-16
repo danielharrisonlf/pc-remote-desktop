@@ -1,17 +1,17 @@
 # PC Remote Desktop
 
-Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositório Windows independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.2.2, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md) e [validação](docs/TESTING.md).
+Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositório Windows independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.3.0, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md) e [validação](docs/TESTING.md).
 
-## Baixar e instalar — Windows 0.2.2
+## Baixar e instalar — Windows 0.3.0
 
 | Aplicativo | Download |
 |---|---|
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.2.2/pc-remote-desktop-0.2.2-x64-setup.exe) |
-| Android — APK universal | [Baixar APK 0.2.4](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.4-kotlin/pc-remote-android-kotlin-0.2.4-evaluation.apk) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.3.0/pc-remote-desktop-0.3.0-x64-setup.exe) |
+| Android — APK universal | [Baixar APK 0.3.0](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.3.0-kotlin/pc-remote-android-kotlin-0.3.0-evaluation.apk) |
 
-Os downloads estão nas Releases privadas: entre no GitHub com uma conta que tenha acesso aos dois repositórios. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.2.2) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.2.4-kotlin) também incluem os hashes SHA-256.
+O instalador Windows fica nas Releases privadas deste repositório: entre no GitHub com uma conta que tenha acesso. O APK Android é público. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.3.0) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.3.0-kotlin) também incluem os hashes SHA-256.
 
-Instale o `.exe` no Windows e abra o PC Remote pela bandeja. No celular, abra o APK ARM64 pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte ambos à mesma rede local, inicie o pareamento no PC, escaneie o QR ou informe os dados exibidos e confirme o pedido no Windows. Os aplicativos instalados não precisam de Metro, Expo Go ou ferramentas de desenvolvimento.
+Instale o `.exe` no Windows e abra o PC Remote pela bandeja. No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
 
 Esta é uma versão de avaliação: APK assinado com chave debug e instalador sem Authenticode. A validação em celular físico e players reais permanece pendente; consulte [testes e limitações](docs/TESTING.md).
 
@@ -82,7 +82,7 @@ A ativação é descartada ao desconectar, suspender ou colocar o Android em seg
 
 O Windows consulta `releases/latest` de `pc-remote-desktop` ao abrir e no intervalo escolhido em **Configurações → Atualizações** (1 h, 6 h, 24 h ou manual; padrão 6 h). O resultado fica em cache para respeitar o limite de 60 consultas/h da API pública. Com versão nova, aparece **Versão X disponível** no cabeçalho; o diálogo mostra as notas e abre o instalador no navegador. Nada é instalado sem confirmação, e só URLs de releases deste projeto podem ser abertas pelo comando `open_url`.
 
-Enquanto o repositório for privado, a API pública responde 404: a verificação automática fica silenciosa e a manual explica o motivo. Publique as releases (ou torne o repositório público) para o aviso funcionar.
+Enquanto o repositório for privado, a API pública responde 404: a verificação automática fica silenciosa e a manual explica o motivo. Torne o repositório público para o aviso funcionar.
 
 ## Integração contínua
 

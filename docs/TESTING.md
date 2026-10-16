@@ -2,6 +2,13 @@
 
 O código contém integrações nativas reais. Testes unitários não comprovam compatibilidade de cada player, permissões do Android nem continuidade durante suspensão. Este registro distingue execução automatizada, execução no Windows deste ambiente e validações pendentes em Android físico.
 
+## Atualização 0.3.0 — redesign do painel, 16/10/2026
+
+- **33 testes Rust passaram**, com quatro smokes ignorados por padrão. **23 testes Vitest passaram**, incluindo a faixa de cores da identidade com os mesmos valores do Android, versões semânticas e leitura das releases.
+- TypeScript, Vite, Rust release e NSIS concluíram; instalador Windows x64 de 3.490.247 bytes gerado, sem Authenticode. O binário informa a versão 0.3.0.
+- O instalador não foi executado nesta máquina: a instalação pessoal em uso não foi substituída. O painel foi conferido antes por capturas do frontend; o pareamento com o Android 0.3.0 foi testado contra um servidor de teste, não contra este backend instalado.
+- Com o repositório privado, a consulta sem login a `releases/latest` responde 404 e o painel não encontra a versão publicada.
+
 ## Atualização 0.2.2 — revisão de bugs, 15/10/2026
 
 - **28 testes Rust passaram**, com quatro smokes ignorados por padrão. O teste nativo de clipboard Windows passou separadamente; o conteúdo original foi restaurado, sem registrar seu texto.
