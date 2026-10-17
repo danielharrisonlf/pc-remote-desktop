@@ -1,10 +1,10 @@
-# Versões verificadas em 16/10/2026
+# Versões verificadas em 17/10/2026
 
 Os lockfiles são a referência exata de todas as dependências transitivas. As versões abaixo foram usadas nas builds locais que acompanham esta entrega; não são versões beta.
 
 | Componente | Versão |
 |---|---|
-| Desktop / Android / protocolo | 0.6.1 / 0.6.1-kotlin / 1 + extensões opcionais input.v1, files.v1, files.v2, search.v1, info.v1, power.v1 e clipboard.v2 |
+| Desktop / Android / protocolo | 0.6.2 / 0.6.1-kotlin / 1 + extensões opcionais input.v1, files.v1, files.v2, search.v1, info.v1, power.v1 e clipboard.v2 |
 | Node / npm | 24.21.0 / 11.19.0 |
 | Rust / MSVC / Windows SDK de build | 1.97.1 / 19.44 / 10.0.26100.0 |
 | Tauri Rust / CLI / API JS | 2.12.3 / 2.12.2 / 2.12.3 |
@@ -12,7 +12,9 @@ Os lockfiles são a referência exata de todas as dependências transitivas. As 
 | Tauri Notification (notify-rust) | 2.5.1 (4.18.2) |
 | Tauri Updater (minisign-verify, reqwest) | 2.13.3 (0.3.0, 0.13.5); features `rustls-tls` e `system-proxy`, sem `zip` |
 | semver | 1.0.28 |
-| windows crate | 0.62.2 |
+| image (PNG/JPEG/BMP puro Rust) | 0.25.10 |
+| windows / windows-registry (`cfg(windows)`) | 0.62.2 / 0.6.1 |
+| arboard / zbus / x11rb / libc (`cfg(target_os = "linux")`) | 3.6.1 / 5.14.0 / 0.13.2 / 0.2.177 |
 | Desktop React / TypeScript / Vite | 19.3.0 / 5.9.3 / 8.3.4 |
 | Vitest | 5.0.4 |
 | Android: Kotlin integrado ao AGP / Android Gradle Plugin / Gradle | 2.2.10 / 9.2.1 / 9.4.1 |
@@ -29,7 +31,7 @@ Target Android 36: o acesso LAN usa INTERNET e NSD. Ao elevar target para 37, im
 
 | Android | Desktop | Compatibilidade |
 |---|---|---|
-| 0.6.1-kotlin | 0.6.1 | Protocolo 1 + input.v1, files.v1, files.v2, search.v1, info.v1, power.v1 e clipboard.v2: tudo da 0.6.0, mais bloquear, suspender, desligar e reiniciar o PC (agora ou agendado) e imagens na área de transferência nos dois sentidos |
+| 0.6.1-kotlin | 0.6.1 e 0.6.2 | Protocolo 1 + input.v1, files.v1, files.v2, search.v1, info.v1, power.v1 e clipboard.v2: tudo da 0.6.0, mais bloquear, suspender, desligar e reiniciar o PC (agora ou agendado) e imagens na área de transferência nos dois sentidos (Windows e Linux/Ubuntu na 0.6.2) |
 | 0.6.1-kotlin | 0.6.0 | O PC ignora power.v1 e clipboard.v2: sem energia do PC e clipboard só com texto; vários PCs e controles de mídia fora do app funcionam |
 | 0.6.0-kotlin | 0.6.1 | Formato 0.6.0, sem campos novos |
 | 0.6.0-kotlin | 0.6.0 | Protocolo 1 + input.v1, files.v1, files.v2, search.v1 e info.v1: arquivos de qualquer tipo até 1 GB nos dois sentidos, touchpad e clipboard prontos após o pareamento, pesquisa no YouTube e nome do Windows |
