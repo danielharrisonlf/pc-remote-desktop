@@ -4,7 +4,7 @@ Os lockfiles são a referência exata de todas as dependências transitivas. As 
 
 | Componente | Versão |
 |---|---|
-| Desktop / Android / protocolo | 0.6.3 / 0.6.2-kotlin / 1 + extensões opcionais input.v1, files.v1, files.v2, search.v1, info.v1, power.v1, clipboard.v2, wol.v1, numpad.v1, presentation.v1 e deck.v1 |
+| Desktop / Android / protocolo | 0.6.4 / 0.6.3-kotlin / 1 + extensões opcionais input.v1, files.v1, files.v2, search.v1, info.v1, power.v1, clipboard.v2, wol.v1, numpad.v1, presentation.v1 e deck.v1 |
 | Node / npm | 24.21.0 / 11.19.0 |
 | Rust / MSVC / Windows SDK de build | 1.97.1 / 19.44 / 10.0.26100.0 |
 | Tauri Rust / CLI / API JS | 2.12.3 / 2.12.2 / 2.12.3 |
@@ -31,6 +31,7 @@ Target Android 36: o acesso LAN usa INTERNET e NSD. Ao elevar target para 37, im
 
 | Android | Desktop | Compatibilidade |
 |---|---|---|
+| 0.6.3-kotlin | 0.6.4 | Mesmo protocolo e extensões da 0.6.2/0.6.3; identidade vetorial unificada, ícones adaptativos e correções de clipboard de imagens e entrega XTEST no Linux |
 | 0.6.2-kotlin | 0.6.3 | Protocolo 1 + input.v1, files.v1, files.v2, search.v1, info.v1, power.v1, clipboard.v2, wol.v1, numpad.v1, presentation.v1 e deck.v1: tudo da 0.6.2, mais Wake-on-LAN (MAC broadcast), teclado numérico dedicado (Keypad), controle de slides/apresentação (Presentation), deck de 12 atalhos do sistema (Deck) e latência de mouse minimizada com TCP_NODELAY e 60 FPS |
 | 0.6.1-kotlin | 0.6.1 e 0.6.2 | Protocolo 1 + input.v1, files.v1, files.v2, search.v1, info.v1, power.v1 e clipboard.v2: tudo da 0.6.0, mais bloquear, suspender, desligar e reiniciar o PC (agora ou agendado) e imagens na área de transferência nos dois sentidos (Windows e Linux/Ubuntu na 0.6.2) |
 | 0.6.1-kotlin | 0.6.0 | O PC ignora power.v1 e clipboard.v2: sem energia do PC e clipboard só com texto; vários PCs e controles de mídia fora do app funcionam |
