@@ -39,13 +39,12 @@
   width: 28px;
   height: 28px;
   border-radius: var(--radius-md);
-  background: var(--accent);
-  color: var(--on-accent);
+  background: #0f141c;
 }
 
-.brand-mark svg {
-  width: 17px;
-  height: 17px;
+.brand-mark img {
+  width: 28px;
+  height: 28px;
 }
 
 .brand-name {

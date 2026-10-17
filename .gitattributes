@@ -1,0 +1,3 @@
+# Keep executable shell fixtures usable after a Windows checkout with autocrlf.
+scripts/linux-validation*.sh text eol=lf
+Dockerfile.linux text eol=lf

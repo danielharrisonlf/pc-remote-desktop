@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:22.04 AS linux-system-dependencies
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -13,18 +13,36 @@ RUN apt-get update && apt-get install -y \
     libayatana-appindicator3-dev \
     librsvg2-dev \
     libwebkit2gtk-4.1-dev \
+    dbus-daemon \
+    dbus-x11 \
+    xvfb \
+    xauth \
+    x11-utils \
+    pulseaudio \
+    pulseaudio-utils \
+    at-spi2-core \
+    python3-pyatspi \
+    gir1.2-atspi-2.0 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y nodejs \
-    && npm install -g @tauri-apps/cli \
     && rm -rf /var/lib/apt/lists/*
 
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+FROM linux-system-dependencies AS linux-rust-toolchain
 
-WORKDIR /workspace
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal --component rustfmt
+
+FROM linux-rust-toolchain AS linux-validation
+
+RUN useradd --create-home --uid 10001 --shell /bin/bash validation \
+    && mkdir -p /validation/cache \
+    && chown -R validation:validation /usr/local/cargo /usr/local/rustup /validation
+
+USER validation
+WORKDIR /validation

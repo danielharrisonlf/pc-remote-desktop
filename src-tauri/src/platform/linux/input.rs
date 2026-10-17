@@ -132,6 +132,9 @@ where
         RustConnection::connect(None).map_err(|e| format!("X11 connect failed: {e}"))?;
     f(&conn, screen_num)?;
     conn.flush().map_err(|e| format!("X11 flush failed: {e}"))?;
+    // This connection is dropped on return. Wait until the server has processed
+    // its requests; flushing alone can lose queued input when the socket closes.
+    conn.sync().map_err(|e| format!("X11 sync failed: {e}"))?;
     Ok(())
 }
 

@@ -66,6 +66,18 @@ fn hash_bytes(tag: u8, bytes: &[u8]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
+// Both writes and polling use decoded pixels. PNG compression/metadata must not
+// turn our own image into a new clipboard change; dimensions distinguish images
+// with identical byte streams laid out in different shapes.
+fn hash_image(width: usize, height: usize, rgba: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update([b'I']);
+    hasher.update((width as u64).to_le_bytes());
+    hasher.update((height as u64).to_le_bytes());
+    hasher.update(rgba);
+    hasher.finalize().into()
+}
+
 fn bump_sequence(last_digest: &mut Option<[u8; 32]>, new_digest: [u8; 32]) -> u32 {
     if *last_digest != Some(new_digest) {
         *last_digest = Some(new_digest);
@@ -158,6 +170,7 @@ impl ClipboardBackend for LinuxClipboard {
 
         with_clipboard(|cb, last_digest| {
             check_write_sequence(expected_sequence, SEQUENCE.load(Ordering::SeqCst))?;
+            let digest = hash_image(width, height, &raw);
             let data = ImageData {
                 width,
                 height,
@@ -165,7 +178,6 @@ impl ClipboardBackend for LinuxClipboard {
             };
             cb.set_image(data)
                 .map_err(|_| PlatformError::ClipboardBusy)?;
-            let digest = hash_bytes(b'I', png);
             Ok(bump_sequence(last_digest, digest))
         })
     }
@@ -187,7 +199,7 @@ impl ClipboardBackend for LinuxClipboard {
                     }
                     if let Ok(img) = cb.get_image() {
                         if img.width > 0 && img.height > 0 {
-                            let digest = hash_bytes(b'I', &img.bytes);
+                            let digest = hash_image(img.width, img.height, &img.bytes);
                             if *last_digest != Some(digest) {
                                 return Ok(Some(bump_sequence(last_digest, digest)));
                             }

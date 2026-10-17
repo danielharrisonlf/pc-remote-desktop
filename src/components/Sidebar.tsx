@@ -1,4 +1,5 @@
-import { MonitorSmartphone, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import brandIcon from '../assets/brand.svg';
 import { cx } from '../lib/cx';
 import { pages, primaryPages, type Page } from '../navigation';
 
@@ -54,7 +55,7 @@ export function Sidebar({ page, onNavigate, collapsed, canToggle, onToggle, pend
     <aside className={cx('sidebar', collapsed && 'is-collapsed')}>
       <div className="brand">
         <span className="brand-mark" aria-hidden>
-          <MonitorSmartphone />
+          <img src={brandIcon} alt="" />
         </span>
         <span className="brand-name">PC Remote</span>
       </div>

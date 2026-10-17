@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .vite/
+.icon-venv/
 *.local
 .env
 .env.*
