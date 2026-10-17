@@ -6,7 +6,7 @@ Contrato normativo, copiado integralmente nos dois repositórios. Transporte WSS
 
 PC gera certificado autoassinado próprio, chave protegida por Windows DPAPI (usuário atual). QR contém JSON `{v:1,host,port:43127,pcId,fingerprint,code}`; fingerprint é SHA-256 hexadecimal de todo certificado DER. A alternativa manual exige endereço, código **e fingerprint visível no PC**, não somente código. Android usa OkHttp nativo com trust manager exclusivo que aceita somente o DER fixado e válido. O hostname canônico pc-remote.local é validado pelo verificador padrão contra o SAN; um Dns exclusivo resolve esse nome para o IPv4 selecionado. Não altera trust manager ou verificador global. Código aleatório de 8 dígitos, validade 120 s, janela de pareamento explicitamente aberta, tentativas limitadas. Confirmar identidade/nome no PC antes de emitir credencial. Não se deve aceitar fingerprint obtido somente de descoberta ou de conexão não autenticada.
 
-Credencial individual aleatória de 256 bits, armazenada por Android Keystore/AES-GCM e DPAPI no Windows. Autenticação bearer acontece somente dentro do TLS fixado. Android salva identidade apenas após aprovação. PC armazena hash SHA-256 do token. Remoção revoga hash e fecha conexão ativa. Nenhuma operação além de pareamento/hello antes de autenticar. Um PC selecionado no Android e um dispositivo controlador conectado por PC no MVP.
+Credencial individual aleatória de 256 bits, armazenada por Android Keystore/AES-GCM e DPAPI no Windows. Autenticação bearer acontece somente dentro do TLS fixado. Android salva identidade apenas após aprovação. PC armazena hash SHA-256 do token. Remoção revoga hash e fecha conexão ativa. Nenhuma operação além de pareamento/hello antes de autenticar. O Android conecta a um PC por vez (desde o 0.6.1 guarda até 8 pareados) e o PC aceita um dispositivo controlador conectado por vez.
 
 Cliente → PC:
 
@@ -83,7 +83,7 @@ Android acompanha alterações apenas em foco. Ao retomar estabelece baseline se
 
 **A partir dos aplicativos 0.6.0** cada app tem uma única opção, **Sincronização em tempo real**, ligada por padrão (o Windows grava `realtime` em `settings.json`; o Android, a preferência `realtime`). O PC envia `clipboard.event` automático só com a opção ligada no PC e `download` pedido pelo celular, e aceita `clipboard.set` automático só com a opção ligada no PC e `upload` pedido pelo celular. Ações manuais (`clipboard.set` com `automatic:false`, `clipboard.get`, arquivos) não dependem da opção. No Android 0.6 com a opção ligada: o texto que chega do PC vai direto para a área de transferência do celular, também com o app em segundo plano enquanto a conexão existir (o Android limita a leitura em segundo plano, não a escrita); com o app em foco, cada cópia é enviada ao PC; ao voltar para o app, um texto copiado enquanto ele estava fora é enviado uma vez, se for diferente do último texto visto ou trocado nesta execução do app (na primeira abertura só vira referência, sem envio). O texto aplicado a partir do PC vira a referência, então não volta ao PC. "Buscar do PC" (`clipboard.get`) copia direto no celular.
 
-Android bloqueia texto com EXTRA_IS_SENSITIVE. Windows bloqueia ExcludeClipboardContentFromMonitorProcessing e CanUploadToCloudClipboard=0. Isso não detecta todas as senhas. Unicode e quebras preservados; rejeitar NUL e texto acima do limite. O clipboard continua só texto; imagens e PDFs do celular para o PC usam a extensão files.v1.
+Android bloqueia texto com EXTRA_IS_SENSITIVE. Windows bloqueia ExcludeClipboardContentFromMonitorProcessing e CanUploadToCloudClipboard=0. Isso não detecta todas as senhas. Unicode e quebras preservados; rejeitar NUL e texto acima do limite. Sem clipboard.v2 o clipboard é só texto; imagens e PDFs do celular para o PC usam a extensão files.v1. Imagens na área de transferência usam clipboard.v2 (aplicativos 0.6.1).
 
 ## Extensão negociada files.v1 — imagens e PDFs do celular
 
@@ -178,6 +178,61 @@ Não existe abertura de endereço arbitrário: o celular manda só o texto da pe
 
 Linha `X-PC-Remote-Features: info.v1`. Só com ela o welcome traz o campo extra `"os":"Windows 11"` (1..64 bytes UTF-8, sem controles), lido do registro do Windows (build 22000 ou maior = Windows 11). O Android mostra esse texto abaixo do nome do PC e o guarda para exibir enquanto desconectado; não o usa para decisões.
 
+## Extensão negociada power.v1 — energia do PC (aplicativos 0.6.1)
+
+Linha `X-PC-Remote-Features: power.v1`. Só com ela o welcome traz `power.control` e o snapshot traz o campo `power`; os demais clientes recebem exatamente o formato anterior.
+
+```json
+"power":{"allowed":true,"scheduled":null}
+"power":{"allowed":true,"scheduled":{"action":"shutdown","remainingSeconds":1740}}
+```
+
+`allowed` é falso enquanto **Interromper** está ativo no PC (o mesmo bloqueio de mouse e teclado). `scheduled` é a ação agendada no PC — uma só por PC, venha de qual celular vier — com os segundos restantes (1..86.400, arredondados para cima) no momento do snapshot; o celular conta localmente a partir do recebimento. Só a contagem passar não gera snapshot; agendar, cancelar, executar e mudar `allowed` geram.
+
+| kind | Campos | Regras / resultado |
+|---|---|---|
+| power.run | action: `lock`, `sleep`, `shutdown` ou `restart`; delaySeconds: inteiro 0..86.400 | `lock` só aceita 0; fora disso `invalid_message`. Sem negociação → `unavailable`. Com Interromper ativo → `unavailable`. Mais de 3 em 10 s → `rate_limited`. `sleep` num PC sem suspensão (nem S1–S3 nem Modern Standby em `GetPwrCapabilities`) → `unavailable`. Com 0, o PC cancela o agendamento existente, responde `ack` e executa 500 ms depois, para o `ack` sair antes. Com mais de 0, substitui o agendamento anterior e responde `ack` seguido de snapshot |
+| power.cancel | nenhum | Cancela o agendamento, se houver. Sempre `ack`, inclusive com Interromper ativo; snapshot só quando havia agendamento |
+
+Execução no Windows, sem nunca forçar o fechamento de programas:
+
+- `lock`: `LockWorkStation`.
+- `sleep`: `SetSuspendState(FALSE, FALSE, FALSE)` com o privilégio `SE_SHUTDOWN_NAME`. Em PCs com Modern Standby, se a chamada falhar, o PC desliga a tela com `SC_MONITORPOWER`.
+- `shutdown`: `InitiateShutdownW` com prazo 0, `SHUTDOWN_POWEROFF` (mais `SHUTDOWN_HYBRID` quando a Inicialização Rápida está ligada) e motivo planejado. Programas com trabalho não salvo podem segurar o desligamento; o Windows mostra a própria tela.
+- `restart`: `InitiateShutdownW` com `SHUTDOWN_RESTART | SHUTDOWN_RESTARTAPPS`.
+- Uma falha depois do `ack` vira diagnóstico e notificação no PC; nada é repetido.
+
+O agendamento fica só na memória do PC: fechar o PC Remote ou reiniciar o Windows o descarta. Ele continua se o celular desconectar. O PC notifica ao agendar ("Desligar às 23:40, pedido por <celular>") e, para prazos de 2 min ou mais, 60 s antes. Cancelam o agendamento: o painel (Visão geral), a bandeja, `power.cancel` de qualquer celular pareado, **Interromper** e a revogação do celular que agendou. No prazo, se Interromper estiver ativo, o agendamento é descartado sem executar.
+
+## Extensão negociada clipboard.v2 — imagens na área de transferência (aplicativos 0.6.1)
+
+Linha `X-PC-Remote-Features: clipboard.v2`. Usa o transporte de files.v2, então só vale com files.v2 também negociado; com as duas o welcome traz `clipboard.image`. As regras de consentimento são as do texto: envio automático exige **Sincronização em tempo real** ligada no PC e a direção pedida pelo celular em `sync.set`; envios manuais não dependem dela. Conteúdo marcado como sensível (Windows: `ExcludeClipboardContentFromMonitorProcessing`, `CanUploadToCloudClipboard=0`; Android: `EXTRA_IS_SENSITIVE`) nunca sai. Quando há texto na área de transferência, o texto tem prioridade e a imagem não é enviada.
+
+Limites de imagem: PNG ou JPEG, 1..33.554.432 bytes (32 MiB), até 50.000.000 pixels (largura × altura).
+
+### PC → celular
+
+1. Uma cópia no Windows sem `CF_UNICODETEXT` e com imagem (formato registrado `PNG`, `CF_DIBV5` ou `CF_DIB`) vira PNG: o formato `PNG` como está, depois de conferir a assinatura; senão o DIB convertido pelo WIC. Acima dos limites, nada é enviado e o painel registra o motivo.
+2. O PC anuncia com `file.push` e o campo extra `clipboard`, que só aparece em conexões com clipboard.v2: `{"v":1,"type":"file.push","transferId":"uuid","name":"Imagem do PC.png","size":123456,"mime":"image/png","ticket":"<64 hex>","clipboard":{"revision":7,"automatic":true}}`. `revision` é o `clipboardRevision` depois desta cópia. O resto do fluxo é o de files.v2 (fetch, progresso, SHA-256).
+3. Pushes de clipboard não entram na fila nem no histórico de arquivos do painel; passam na frente dos arquivos que ainda esperam, mas não interrompem um arquivo em andamento. Qualquer cópia nova no PC (texto ou imagem) descarta o push de clipboard ainda não concluído: na fila, anunciado (o ticket deixa de valer) ou em transferência (erro `unavailable` no socket de arquivos).
+4. `clipboard.get` sem texto e com imagem: o PC anuncia a imagem com `"automatic":false` e responde `ack` (o `ack` confirma o anúncio). Sem texto nem imagem continua `unavailable`.
+5. O celular só aceita um push com `clipboard` se `mime` for `image/png` e o tamanho couber nos limites; senão recusa com `file.decline` `unavailable`. Recusa também um automático com a sincronização desligada no celular ou com `revision` menor que a última revisão de clipboard que ele viu. Grava no cache privado do app (sem MediaStore, sem a notificação "Arquivo recebido" e fora de Recentes), confere o SHA-256 e coloca na área de transferência um `content://` do próprio FileProvider (rótulo "Imagem do PC", MIME `image/png`). Guarda só a imagem mais recente. Falhas e cancelamentos de pushes de clipboard não aparecem como erro de arquivo.
+
+### Celular → PC
+
+1. `file.offer` com o campo extra `clipboard`, só em conexões com clipboard.v2: `{"kind":"file.offer","transferId":"uuid","name":"Imagem.png","size":123456,"mime":"image/png","clipboard":{"eventId":"uuid","automatic":true,"baseRevision":7}}`. `mime` é `image/png` ou `image/jpeg`; o celular converte outros formatos (WebP, GIF, HEIC, BMP) para PNG antes de oferecer. O nome é só informativo.
+2. O PC confere, nesta ordem: negociação (sem ela o campo é desconhecido → `invalid_message`); `mime` → `file_type`; tamanho → `too_large` ("Imagem excede 32 MB"); consentimento de um automático → `unavailable`; `eventId` já visto ou, se automático, `baseRevision` diferente da atual → `conflict`. Depois segue o fluxo de files.v1/v2 (ticket, socket, progresso, SHA-256).
+3. Em `file.end` o PC confere tamanho, SHA-256 e assinatura (PNG ou JPEG), decodifica com o WIC (falha → `file_type`; acima de 50 MP → `too_large`) e grava na área de transferência `CF_DIBV5` (BGRA de 32 bits) e o formato registrado `PNG` (o original, ou o JPEG convertido). Uma escrita automática exige que a área de transferência do Windows não tenha mudado desde a oferta; senão `conflict`. A escrita própria não volta ao celular. Nada é salvo em Downloads nem marcado com `Zone.Identifier`; os dados temporários são apagados. `file.done` responde com `"name":"Área de transferência"`.
+4. Erros no socket de arquivos são os de files.v1/v2, mais `conflict` (retryable false).
+
+No Android, imagens seguem as mesmas regras do texto: com foco, cada cópia de imagem é enviada; uma imagem copiada em outro app vai uma vez, ao voltar para o PC Remote; na primeira abertura só vira referência. O celular nunca reenvia um clip cujo `content://` é do próprio app. **Enviar o que copiei** envia a imagem quando o clip é uma imagem.
+
+## Android 0.6.1 sem mudança de protocolo: vários PCs e controles de mídia fora do app
+
+O Android guarda até 8 PCs pareados, cada um com o próprio token, identidade fixada e `deviceId`, e conecta a um por vez (o "PC atual"). Trocar de PC encerra a conexão anterior e descarta a fila e o histórico de arquivos dela, como remover o PC. Parear de novo um PC já salvo (mesmo `pcId`) substitui o registro dele. O registro único das versões anteriores é migrado para a lista.
+
+Enquanto o PC atual estiver conectado e com uma sessão de mídia, o Android mostra uma notificação de mídia (Anterior, Tocar/Pausar e Próxima, conforme as capacidades da sessão) com uma `MediaSession` própria, que também aparece na tela de bloqueio e nos controles de mídia do sistema. Um serviço em primeiro plano do tipo `mediaPlayback` mantém a conexão enquanto a notificação existe; ele começa com o app em primeiro plano ou por um toque do usuário no widget, no bloco de Configurações rápidas ou na própria notificação. O widget e o bloco conectam ao PC atual na hora do toque, se preciso, e enviam um único `media.control` para a primeira sessão do snapshot. Os comandos são os de `media.control`; não há mensagem nova.
+
 ## Compatibilidade
 
 | Android | Desktop | Protocolo | Resultado |
@@ -192,6 +247,9 @@ Linha `X-PC-Remote-Features: info.v1`. Só com ela o welcome traz o campo extra 
 | 0.4.x / 0.5.x | 0.6.x | 1 + input.v1 + files.v1 | Formato anterior; arquivos e mouse/teclado já liberados no PC; clipboard sincroniza quando o celular liga as direções |
 | 0.6.x | 0.4.x / 0.5.x | 1 + input.v1 + files.v1 | O PC ignora files.v2, search.v1 e info.v1: só PNG/JPG/PDF de até 50 MB do celular para o PC, sem PC → celular, sem pesquisa por voz no PC, sem nome do sistema; clipboard e mouse/teclado ainda pedem as chaves do PC |
 | 0.6.x | 0.6.x | 1 + input.v1 + files.v1 + files.v2 + search.v1 + info.v1 | Tudo pronto após o pareamento: arquivos de até 1 GB nos dois sentidos, clipboard em tempo real, touchpad, pesquisa por voz |
+| 0.6.1 | 0.6.0 | 1 + input.v1 + files.v1 + files.v2 + search.v1 + info.v1 | O PC ignora power.v1 e clipboard.v2: sem energia do PC; o clipboard sincroniza só texto. Vários PCs e controles de mídia fora do app funcionam |
+| 0.6.0 | 0.6.1 | 1 + input.v1 + files.v1 + files.v2 + search.v1 + info.v1 | Formato 0.6.0, sem campos novos |
+| 0.6.1 | 0.6.1 | 0.6.0 + power.v1 + clipboard.v2 | Também bloquear, suspender, desligar e reiniciar o PC (agora ou agendado) e imagens na área de transferência nos dois sentidos |
 | 0.1.x / 0.2.x | versão sem protocolo 1 | outro | Rejeitado com version_mismatch |
 
 ## Ciclo de vida e extensão

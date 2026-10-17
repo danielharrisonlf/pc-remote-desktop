@@ -6,6 +6,7 @@ import { FingerprintPanel } from '../components/Fingerprint';
 import { useToast } from '../hooks/useToasts';
 import { copyText } from '../lib/clipboard';
 import { formatClock, plural } from '../lib/format';
+import { powerSummary } from './summaries';
 import { errorMessage, PROTOCOL_VERSION, preferredAddress, type DesktopStatus } from '../types';
 import type { ViewProps } from './viewProps';
 
@@ -29,7 +30,8 @@ export function buildReport(status: DesktopStatus, appVersion: string, serviceLa
     `Celulares pareados: ${status.devices.length} (${status.devices.filter(device => device.connected).length} conectado)`,
     `Pedidos pendentes: ${status.pending.length}`,
     `Sincronização em tempo real: ${status.settings.realtime ? 'ligada' : 'desligada'}`,
-    `Mouse e teclado: ${status.settings.inputBlocked ? 'bloqueado' : 'liberado'}${status.inputActive ? ', em uso' : ''}`,
+    `Mouse, teclado e energia: ${status.settings.inputBlocked ? 'bloqueado' : 'liberado'}${status.inputActive ? ', em uso' : ''}`,
+    `Energia agendada: ${status.powerScheduled ? powerSummary(status.powerScheduled, Date.now()) : 'nada'}`,
     `Arquivos: ${plural(status.fileHistory.length, 'transferido', 'transferidos')} nesta execução${status.incomingFile ? ', recebendo' : ''}${status.outgoing ? ', enviando' : ''}, ${plural(status.outgoingQueue.length, 'na fila', 'na fila')}; celular ${status.phoneReceivesFiles ? 'recebe' : 'não recebe'} arquivos do PC`,
     `Iniciar com o Windows: ${status.settings.autostart ? 'sim' : 'não'}`,
     '',

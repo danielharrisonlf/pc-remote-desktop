@@ -6,7 +6,7 @@
 //! never overwriting, only after size, SHA-256 and (files.v1) content signature match.
 use crate::{
     core::{constant_time_eq, now_ms, Core, Runtime, TransferDirection},
-    protocol::{MAX_FILE_BYTES, MAX_FILE_BYTES_V2},
+    protocol::{ClipboardOffer, MAX_FILE_BYTES, MAX_FILE_BYTES_V2, MAX_IMAGE_BYTES},
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -294,6 +294,27 @@ pub fn check_offer_v2(
     Ok((safe, FileKind::Any))
 }
 
+/// clipboard.v2 `file.offer`: a PNG or JPEG of up to 32 MiB; the name is only informative.
+pub fn check_clipboard_offer(
+    transfer_id: Uuid,
+    name: &str,
+    size: u64,
+    mime: &str,
+) -> Result<FileKind, &'static str> {
+    if !offer_fields_valid(transfer_id, name, size) {
+        return Err("invalid_message");
+    }
+    let kind = match mime {
+        "image/png" => FileKind::Png,
+        "image/jpeg" => FileKind::Jpeg,
+        _ => return Err("file_type"),
+    };
+    if size > MAX_IMAGE_BYTES {
+        return Err("too_large");
+    }
+    Ok(kind)
+}
+
 /// Wall-clock budget of one transfer: 15 min, or 1 s per 256 KiB for large files.
 pub fn total_timeout(size: u64, files_v2: bool) -> Duration {
     let base = Duration::from_secs(15 * 60);
@@ -311,6 +332,15 @@ pub fn is_sha256_hex(value: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
+/// clipboard.v2: an image from the phone that goes to the Windows clipboard, not Downloads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClipTarget {
+    pub event_id: Uuid,
+    pub automatic: bool,
+    /// Windows clipboard sequence at the offer; an automatic write needs it unchanged.
+    pub expected_sequence: u32,
+}
+
 pub struct Ticket {
     secret: [u8; 32],
     device: Uuid,
@@ -321,6 +351,7 @@ pub struct Ticket {
     kind: FileKind,
     folder: PathBuf,
     expires: Instant,
+    clipboard: Option<ClipTarget>,
 }
 
 pub struct Active {
@@ -331,6 +362,8 @@ pub struct Active {
     size: u64,
     received: u64,
     abort: Arc<Notify>,
+    /// Clipboard images are not files: the panel does not list them.
+    clipboard: bool,
 }
 
 /// At most one ticket or transfer exists per PC.
@@ -349,6 +382,7 @@ pub struct Accepted {
     pub kind: FileKind,
     pub folder: PathBuf,
     pub abort: Arc<Notify>,
+    pub clipboard: Option<ClipTarget>,
 }
 
 /// Panel metadata only; the file content is never kept in memory or logs.
@@ -379,6 +413,8 @@ impl Runtime {
         self.files_feature = false;
         self.files_v2 = false;
         self.abort_file();
+        // A clipboard image never waits for the next connection; files do.
+        self.drop_clipboard_push();
         self.abort_outgoing("A conexão com o celular terminou.");
     }
     pub(crate) fn record_file(&mut self, name: &str, bytes: u64, direction: TransferDirection) {
@@ -394,7 +430,7 @@ impl Runtime {
     }
     pub(crate) fn incoming_file(&self) -> Option<IncomingFile> {
         match &self.file_slot {
-            Some(Slot::Active(active)) => Some(IncomingFile {
+            Some(Slot::Active(active)) if !active.clipboard => Some(IncomingFile {
                 name: active.name.clone(),
                 bytes: active.size,
                 received: active.received,
@@ -432,6 +468,8 @@ impl Core {
     }
 
     /// Validates an offer and issues a ticket. Performs folder I/O; call from a blocking thread.
+    /// With `clipboard` (clipboard.v2) the image waits in a temporary folder for the clipboard.
+    #[allow(clippy::too_many_arguments)]
     pub fn file_offer(
         &self,
         device: Uuid,
@@ -440,27 +478,59 @@ impl Core {
         name: &str,
         size: u64,
         mime: &str,
+        clipboard: Option<&ClipboardOffer>,
     ) -> Result<String, &'static str> {
-        let (safe, kind) = {
+        let (safe, kind, clipboard) = {
             let mut s = self.state.lock().unwrap();
             s.files_gate(device, epoch)?;
-            let checked = if s.files_v2 {
-                check_offer_v2(transfer_id, name, size, mime)?
-            } else {
-                check_offer(transfer_id, name, size, mime)?
+            let (safe, kind, target) = match clipboard {
+                Some(offer) => {
+                    if !s.clipboard_image {
+                        return Err("invalid_message");
+                    }
+                    let kind = check_clipboard_offer(transfer_id, name, size, mime)?;
+                    s.clipboard_image_consent(
+                        offer.event_id,
+                        offer.automatic,
+                        Some(offer.base_revision),
+                    )?;
+                    let target = ClipTarget {
+                        event_id: offer.event_id,
+                        automatic: offer.automatic,
+                        expected_sequence: s.clipboard_sequence,
+                    };
+                    (sanitize_name(name), kind, Some(target))
+                }
+                None if s.files_v2 => {
+                    let (safe, kind) = check_offer_v2(transfer_id, name, size, mime)?;
+                    (safe, kind, None)
+                }
+                None => {
+                    let (safe, kind) = check_offer(transfer_id, name, size, mime)?;
+                    (safe, kind, None)
+                }
             };
             if s.file_busy() {
                 return Err("file_busy");
             }
-            checked
+            (safe, kind, target)
         };
         // Disk work happens without the runtime lock; the slot is re-checked below.
-        let folder = self.prepare_folder().map_err(|error| {
-            self.diagnostic(&format!(
-                "Pasta Downloads\\{FOLDER_NAME} indisponível para receber arquivos: {error}"
-            ));
-            "storage"
-        })?;
+        let folder = if clipboard.is_some() {
+            self.clipboard_folder().map_err(|error| {
+                self.diagnostic(&format!(
+                    "Pasta temporária indisponível para imagens do celular: {error}"
+                ));
+                "storage"
+            })?
+        } else {
+            self.prepare_folder().map_err(|error| {
+                self.diagnostic(&format!(
+                    "Pasta Downloads\\{FOLDER_NAME} indisponível para receber arquivos: {error}"
+                ));
+                "storage"
+            })?
+        };
         if free_bytes(&folder).map_or(true, |free| free < size.saturating_add(FREE_SPACE_MARGIN)) {
             self.diagnostic("Arquivo do celular recusado: pouco espaço livre no disco.");
             return Err("storage");
@@ -482,6 +552,7 @@ impl Core {
             kind,
             folder,
             expires: Instant::now() + TICKET_TTL,
+            clipboard,
         }));
         Ok(hex::encode(secret))
     }
@@ -535,6 +606,7 @@ impl Core {
             size: ticket.size,
             received: 0,
             abort: abort.clone(),
+            clipboard: ticket.clipboard.is_some(),
         }));
         Ok(Accepted {
             transfer_id,
@@ -545,6 +617,7 @@ impl Core {
             kind: ticket.kind,
             folder: ticket.folder,
             abort,
+            clipboard: ticket.clipboard,
         })
     }
 
@@ -593,6 +666,16 @@ impl Core {
             None => downloads_folder().ok_or("Pasta Downloads não encontrada")?,
         };
         let folder = base.join(FOLDER_NAME);
+        ensure_plain_folder(&folder)?;
+        Ok(folder)
+    }
+
+    /// Temporary clipboard images in both directions; never Downloads.
+    pub(crate) fn clipboard_folder(&self) -> Result<PathBuf, String> {
+        let folder = match &self.files_root {
+            Some(root) => root.join("clipboard-temp"),
+            None => std::env::temp_dir().join(FOLDER_NAME),
+        };
         ensure_plain_folder(&folder)?;
         Ok(folder)
     }
@@ -1048,7 +1131,7 @@ pub(crate) mod tests {
         epoch: u64,
         transfer: Uuid,
     ) -> Result<String, &'static str> {
-        core.file_offer(device, epoch, transfer, "foto.png", 10, "image/png")
+        core.file_offer(device, epoch, transfer, "foto.png", 10, "image/png", None)
     }
 
     fn cleanup(core: &Core) {
@@ -1075,12 +1158,13 @@ pub(crate) mod tests {
                 Uuid::new_v4(),
                 "a.png",
                 MAX_FILE_BYTES + 1,
-                "image/png"
+                "image/png",
+                None
             ),
             Err("too_large")
         );
         assert_eq!(
-            core.file_offer(id, epoch, Uuid::new_v4(), "a.png", 10, "image/jpeg"),
+            core.file_offer(id, epoch, Uuid::new_v4(), "a.png", 10, "image/jpeg", None),
             Err("file_type")
         );
         let ticket = offer(&core, id, epoch, Uuid::new_v4()).unwrap();
@@ -1358,7 +1442,8 @@ pub(crate) mod tests {
                 Uuid::new_v4(),
                 "filme.mkv",
                 10,
-                "video/x-matroska"
+                "video/x-matroska",
+                None
             ),
             Err("file_type")
         );
@@ -1377,6 +1462,7 @@ pub(crate) mod tests {
                 "filme.mkv",
                 MAX_FILE_BYTES + 1,
                 "video/x-matroska",
+                None,
             )
             .unwrap();
         let accepted = core.file_begin(transfer, &ticket).unwrap();
@@ -1390,7 +1476,8 @@ pub(crate) mod tests {
                 Uuid::new_v4(),
                 "a.lnk",
                 10,
-                "application/octet-stream"
+                "application/octet-stream",
+                None
             ),
             Err("file_type")
         );

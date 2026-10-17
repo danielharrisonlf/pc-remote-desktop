@@ -1,5 +1,6 @@
 use crate::{
     core::{Core, Outgoing},
+    energy,
     files::{self, Accepted, FileKind},
     outbox::Fetched,
     protocol::{self, Action, ClientMessage, DeclineCode, Features, FileClientMessage, Wording},
@@ -274,6 +275,8 @@ async fn control(core: Arc<Core>, mut ws: ServerSocket, features: Features) -> R
                         if features.files { capabilities.push("file.transfer"); }
                         if features.files_v2 { capabilities.push("file.receive"); }
                         if features.search { capabilities.push("search.youtube"); }
+                        if features.power { capabilities.push("power.control"); }
+                        if features.clipboard_image { capabilities.push("clipboard.image"); }
                         let mut welcome = json!({"v":1,"type":"welcome","id":id,"pcId":status.pc_id,"pcName":status.pc_name,"capabilities":capabilities});
                         if features.info { welcome["os"] = json!(crate::system::os_name()); }
                         send(&mut ws,welcome).await?;
@@ -285,12 +288,15 @@ async fn control(core: Arc<Core>, mut ws: ServerSocket, features: Features) -> R
                         if !core.is_authorized_session(device.unwrap(),cleanup.epoch){error(&mut ws,id,"unauthorized").await?;break;}
                         let file = action.is_file();
                         let files_v2 = core.files_v2(device.unwrap(),cleanup.epoch);
-                        let wording = match (file, files_v2) { (false, _) => Wording::Control, (true, false) => Wording::FilesV1, (true, true) => Wording::FilesV2 };
+                        let wording = match (file, files_v2) { (false, _) => Wording::Control, _ if action.is_clipboard_image() => Wording::Image, (true, false) => Wording::FilesV1, (true, true) => Wording::FilesV2 };
                         if file {if let Err(code)=core.file_gate(device.unwrap(),cleanup.epoch){reject(&mut ws,id,code,wording).await?;continue;}}
                         if matches!(&action, Action::FileDecline { .. }) && !files_v2 {reject(&mut ws,id,"unavailable",wording).await?;continue;}
                         if matches!(&action, Action::SearchOpen { .. }) && !features.search {error(&mut ws,id,"unavailable").await?;continue;}
-                        if let Err(code)=protocol::validate_action_for(&action,files_v2){reject(&mut ws,id,code,wording).await?;continue;}
-                        let send_snapshot = !(action.is_input() || file || matches!(&action, Action::SearchOpen { .. })) || matches!(&action, Action::InputEnable { .. });
+                        if action.is_power() && !features.power {error(&mut ws,id,"unavailable").await?;continue;}
+                        let negotiated = protocol::Features { files_v2, ..features };
+                        if let Err(code)=protocol::validate_action_for(&action,&negotiated){reject(&mut ws,id,code,wording).await?;continue;}
+                        // Power changes publish their own snapshot, which then follows the ack.
+                        let send_snapshot = !(action.is_input() || file || action.is_power() || matches!(&action, Action::SearchOpen { .. })) || matches!(&action, Action::InputEnable { .. });
                         let result=dispatch(core.clone(),device.unwrap(),cleanup.epoch,id,action).await;
                         match result {Ok(reply)=>{if let Some(reply)=reply {send(&mut ws,reply).await?;}if send_snapshot {send(&mut ws,serde_json::to_value(core.snapshot()).map_err(|e|e.to_string())?).await?;}send(&mut ws,protocol::ack(id)).await?},Err(code)=>reject(&mut ws,id,&code,wording).await?}
                     }
@@ -321,6 +327,12 @@ fn tungstenite_forbidden() -> ErrorResponse {
         .unwrap()
 }
 
+/// What a finished upload became: a file in Downloads or a clipboard.v2 image in memory.
+enum Received {
+    Saved(String),
+    Image(Vec<u8>),
+}
+
 /// Why a transfer stopped before `file.done`. Partial data is always deleted.
 enum FileAbort {
     Reply(Uuid, &'static str),
@@ -346,7 +358,16 @@ impl FileAbort {
             Self::Cancelled | Self::Closed => None,
         }
     }
-    fn diagnostic(&self) -> String {
+    fn diagnostic(&self, image: bool) -> String {
+        if image {
+            return match self {
+                Self::Cancelled => "Imagem do celular cancelada no celular.".into(),
+                Self::Reply(_, "file_type") => {
+                    "Imagem do celular descartada: formato não reconhecido.".into()
+                }
+                _ => "Imagem do celular descartada antes de chegar à área de transferência.".into(),
+            };
+        }
         let reason = match self {
             Self::Reply(_, "unauthorized") => "a sessão do celular terminou",
             Self::Reply(_, "unavailable") => "recebimento desativado no PC",
@@ -477,7 +498,10 @@ async fn file_socket(core: Arc<Core>, mut ws: ServerSocket) -> Result<(), String
     };
 
     let transfer_id = accepted.transfer_id;
-    let wording = if accepted.kind == FileKind::Any {
+    let image = accepted.clipboard.is_some();
+    let wording = if image {
+        Wording::Image
+    } else if accepted.kind == FileKind::Any {
         Wording::FilesV2
     } else {
         Wording::FilesV1
@@ -494,7 +518,7 @@ async fn file_socket(core: Arc<Core>, mut ws: ServerSocket) -> Result<(), String
         Ok(Ok(file)) => file,
         Ok(Err(error)) => {
             let abort = FileAbort::Storage(begin_id, error.to_string());
-            core.diagnostic(&abort.diagnostic());
+            core.diagnostic(&abort.diagnostic(image));
             drop(guard);
             close_file_socket(&mut ws, abort.reply(), false).await;
             return Ok(());
@@ -514,7 +538,42 @@ async fn file_socket(core: Arc<Core>, mut ws: ServerSocket) -> Result<(), String
 
     let outcome = receive_file(&core, &mut ws, &accepted, file, &part).await;
     match outcome {
-        Ok((end_id, name)) => {
+        Ok((end_id, Received::Image(bytes))) => {
+            // Decoding and the clipboard block; the part file goes with the guard.
+            let checked = core.clone();
+            let accepted = Arc::new(accepted);
+            let target = accepted.clone();
+            let written = tokio::task::spawn_blocking(move || {
+                checked.clipboard_image_received(&target, &bytes)
+            })
+            .await
+            .unwrap_or(Err("internal"));
+            drop(guard);
+            match written {
+                Ok(()) => {
+                    let done = json!({"v":1,"type":"file.done","id":end_id,"transferId":transfer_id,"name":"Área de transferência"});
+                    if send(&mut ws, done).await.is_ok() {
+                        close_file_socket(&mut ws, None, true).await;
+                    }
+                }
+                Err(code) => {
+                    if code == "too_large" {
+                        // The bytes fit 32 MiB; the pixel count did not.
+                        let frame = protocol::wire_error(
+                            end_id,
+                            code,
+                            "Imagem excede 50 megapixels",
+                            false,
+                        );
+                        let _ = send(&mut ws, frame).await;
+                        close_file_socket(&mut ws, None, false).await;
+                    } else {
+                        close_file_socket_with(&mut ws, Some((end_id, code)), false, wording).await;
+                    }
+                }
+            }
+        }
+        Ok((end_id, Received::Saved(name))) => {
             guard.part = None;
             core.file_completed(&accepted.abort, &name, accepted.size);
             drop(guard);
@@ -526,7 +585,7 @@ async fn file_socket(core: Arc<Core>, mut ws: ServerSocket) -> Result<(), String
         }
         Err(abort) => {
             drop(guard);
-            core.diagnostic(&abort.diagnostic());
+            core.diagnostic(&abort.diagnostic(image));
             close_file_socket_with(&mut ws, abort.reply(), false, wording).await;
         }
     }
@@ -534,13 +593,14 @@ async fn file_socket(core: Arc<Core>, mut ws: ServerSocket) -> Result<(), String
 }
 
 /// Streams binary frames to a blocking writer, then verifies and saves the file.
+/// A clipboard.v2 image is read back into memory instead of going to Downloads.
 async fn receive_file(
     core: &Core,
     ws: &mut ServerSocket,
     accepted: &Accepted,
     file: std::fs::File,
     part: &std::path::Path,
-) -> Result<(Uuid, String), FileAbort> {
+) -> Result<(Uuid, Received), FileAbort> {
     let (chunks, queue) = mpsc::channel::<Bytes>(FILE_QUEUE_CHUNKS);
     let writer = tokio::task::spawn_blocking(move || files::write_part(file, queue));
     let mut head = Vec::with_capacity(FILE_HEAD_BYTES);
@@ -621,6 +681,19 @@ async fn receive_file(
     if let Err(code) = core.file_check(accepted, received) {
         return Err(FileAbort::from_check(end_id, code));
     }
+    if accepted.clipboard.is_some() {
+        let part = part.to_path_buf();
+        return match tokio::task::spawn_blocking(move || {
+            drop(written);
+            std::fs::read(&part)
+        })
+        .await
+        {
+            Ok(Ok(bytes)) => Ok((end_id, Received::Image(bytes))),
+            Ok(Err(error)) => Err(FileAbort::Storage(end_id, error.to_string())),
+            Err(_) => Err(FileAbort::Reply(end_id, "internal")),
+        };
+    }
     let (part, folder, name, transfer_id) = (
         part.to_path_buf(),
         accepted.folder.clone(),
@@ -632,7 +705,7 @@ async fn receive_file(
     })
     .await
     {
-        Ok(Ok(saved)) => Ok((end_id, saved)),
+        Ok(Ok(saved)) => Ok((end_id, Received::Saved(saved))),
         Ok(Err(error)) => Err(FileAbort::Storage(end_id, error)),
         Err(_) => Err(FileAbort::Reply(end_id, "internal")),
     }
@@ -696,10 +769,13 @@ async fn send_file(
     let (frame, done) = match &outcome {
         Ok(_) => (None, true),
         Err(abort) => {
-            core.diagnostic(&format!(
-                "{} não foi enviado ao celular: {}",
-                fetched.name, abort.reason
-            ));
+            // A clipboard image is often replaced by a newer copy; that is no failure.
+            if !fetched.clipboard {
+                core.diagnostic(&format!(
+                    "{} não foi enviado ao celular: {}",
+                    fetched.name, abort.reason
+                ));
+            }
             (abort.frame.clone(), false)
         }
     };
@@ -1068,6 +1144,15 @@ mod integration_tests {
     async fn real_tls_v2_welcome_and_any_type_upload_above_the_old_limit() {
         let (server, device, token) = file_server().await;
         let core = server.core.clone();
+        // The app polls every 650 ms, which keeps the resume detector from mistaking a
+        // long upload on a busy test machine for a suspended PC.
+        let poll = core.clone();
+        let ticker = tokio::spawn(async move {
+            loop {
+                poll.check_resume();
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        });
         let (mut control, welcome, state) = session_06(&server, device, &token).await;
         assert_eq!(
             welcome["capabilities"],
@@ -1150,6 +1235,7 @@ mod integration_tests {
             (error["code"].as_str(), error["message"].as_str()),
             (Some("too_large"), Some("Arquivo excede 1 GB"))
         );
+        ticker.abort();
     }
 
     #[tokio::test]
@@ -1281,6 +1367,294 @@ mod integration_tests {
         std::fs::remove_dir_all(folder).unwrap();
     }
 
+    const PHONE_061: &[(&'static str, &str)] = &[
+        ("X-PC-Remote-Features", "input.v1"),
+        ("X-PC-Remote-Features", "files.v1"),
+        ("X-PC-Remote-Features", "files.v2"),
+        ("X-PC-Remote-Features", "search.v1"),
+        ("X-PC-Remote-Features", "info.v1"),
+        ("X-PC-Remote-Features", "power.v1"),
+        ("X-PC-Remote-Features", "clipboard.v2"),
+    ];
+
+    async fn session_061(
+        server: &TestServer,
+        device: Uuid,
+        token: &str,
+    ) -> (TestSocket, Value, Value) {
+        let mut control = connect_with(server.port, &server.certificate_pem, "/v1/ws", PHONE_061)
+            .await
+            .unwrap();
+        emit(
+            &mut control,
+            json!({"v":1,"type":"hello","id":Uuid::new_v4(),"deviceId":device,"token":token}),
+        )
+        .await;
+        let welcome = receive(&mut control, "welcome").await;
+        let state = receive(&mut control, "state").await;
+        (control, welcome, state)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn real_tls_power_is_negotiated_acked_before_its_snapshot_and_blocked_by_interromper() {
+        let (server, device, token) = file_server().await;
+        let core = server.core.clone();
+        let ran = Arc::new(std::sync::Mutex::new(Vec::new()));
+        core.set_power_system(Box::new(crate::energy::tests::Recorder {
+            ran: ran.clone(),
+            sleeps: true,
+            fails: false,
+        }));
+        // A 0.6.0 phone: no capability, no field, and power actions are unavailable.
+        let (mut old, welcome, state) = session_06(&server, device, &token).await;
+        assert!(!welcome["capabilities"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("power.control")));
+        assert!(state.get("power").is_none());
+        let id = Uuid::new_v4();
+        emit(&mut old, json!({"v":1,"type":"request","id":id,"action":{"kind":"power.run","action":"lock","delaySeconds":0}})).await;
+        assert_eq!(
+            next_text(&mut old).await,
+            json!({"v":1,"type":"error","id":id,"code":"unavailable","message":"Ação indisponível neste dispositivo ou player","retryable":false})
+        );
+        drop(old);
+
+        let (mut control, welcome, state) = session_061(&server, device, &token).await;
+        assert_eq!(
+            welcome["capabilities"],
+            json!([
+                "audio",
+                "media",
+                "clipboard.text",
+                "input.control",
+                "file.transfer",
+                "file.receive",
+                "search.youtube",
+                "power.control",
+                "clipboard.image"
+            ])
+        );
+        assert_eq!(state["power"], json!({"allowed":true,"scheduled":null}));
+        // Scheduled: the ack, then the snapshot with the schedule.
+        let id = Uuid::new_v4();
+        emit(&mut control, json!({"v":1,"type":"request","id":id,"action":{"kind":"power.run","action":"shutdown","delaySeconds":1800}})).await;
+        assert_eq!(
+            next_text(&mut control).await,
+            json!({"v":1,"type":"ack","id":id})
+        );
+        let state = next_text(&mut control).await;
+        assert_eq!(state["type"], "state");
+        assert_eq!(state["power"]["scheduled"]["action"], "shutdown");
+        let remaining = state["power"]["scheduled"]["remainingSeconds"]
+            .as_u64()
+            .unwrap();
+        assert!((1799..=1800).contains(&remaining), "{remaining}");
+        assert!(core.status().power_scheduled.is_some());
+        // Field rules.
+        let id = Uuid::new_v4();
+        emit(&mut control, json!({"v":1,"type":"request","id":id,"action":{"kind":"power.run","action":"lock","delaySeconds":60}})).await;
+        assert_eq!(next_text(&mut control).await["code"], "invalid_message");
+        // Cancel: ack, then the snapshot without it; a second cancel is only an ack.
+        let id = Uuid::new_v4();
+        emit(
+            &mut control,
+            json!({"v":1,"type":"request","id":id,"action":{"kind":"power.cancel"}}),
+        )
+        .await;
+        assert_eq!(
+            next_text(&mut control).await,
+            json!({"v":1,"type":"ack","id":id})
+        );
+        assert_eq!(
+            next_text(&mut control).await["power"],
+            json!({"allowed":true,"scheduled":null})
+        );
+        let id = Uuid::new_v4();
+        emit(
+            &mut control,
+            json!({"v":1,"type":"request","id":id,"action":{"kind":"power.cancel"}}),
+        )
+        .await;
+        assert_eq!(
+            next_text(&mut control).await,
+            json!({"v":1,"type":"ack","id":id})
+        );
+        // Now: ack first, the action half a second later.
+        let id = Uuid::new_v4();
+        emit(&mut control, json!({"v":1,"type":"request","id":id,"action":{"kind":"power.run","action":"lock","delaySeconds":0}})).await;
+        assert_eq!(
+            next_text(&mut control).await,
+            json!({"v":1,"type":"ack","id":id})
+        );
+        assert!(ran.lock().unwrap().is_empty());
+        wait_until(|| !ran.lock().unwrap().is_empty()).await;
+        assert_eq!(
+            *ran.lock().unwrap(),
+            vec![crate::protocol::PowerAction::Lock]
+        );
+        // "Interromper": allowed false, and power.run is refused.
+        core.stop_input_with_save(|_| Ok(())).unwrap();
+        assert_eq!(
+            receive(&mut control, "state").await["power"],
+            json!({"allowed":false,"scheduled":null})
+        );
+        let id = Uuid::new_v4();
+        emit(&mut control, json!({"v":1,"type":"request","id":id,"action":{"kind":"power.run","action":"sleep","delaySeconds":600}})).await;
+        assert_eq!(next_text(&mut control).await["code"], "unavailable");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn real_tls_clipboard_image_push_reaches_the_phone_with_its_field() {
+        let (server, device, token) = file_server().await;
+        let core = server.core.clone();
+        let (mut control, ..) = session_061(&server, device, &token).await;
+        emit(&mut control, json!({"v":1,"type":"request","id":Uuid::new_v4(),"action":{"kind":"sync.set","upload":true,"download":true,"paused":false}})).await;
+        receive(&mut control, "ack").await;
+        let png = crate::wic::tests::sample_png();
+        let (epoch, revision) = {
+            let s = core.state.lock().unwrap();
+            (s.connection_epoch, s.clipboard_revision)
+        };
+        core.push_clipboard_image(png.clone(), device, epoch, revision, true, None)
+            .unwrap();
+        let push = receive(&mut control, "file.push").await;
+        assert_eq!(push["name"], "Imagem do PC.png");
+        assert_eq!(push["mime"], "image/png");
+        assert_eq!(
+            push["clipboard"],
+            json!({"revision":revision,"automatic":true})
+        );
+        let transfer = push["transferId"].as_str().unwrap().to_owned();
+        let mut download = connect_with(server.port, &server.certificate_pem, "/v1/files", &[])
+            .await
+            .unwrap();
+        emit(&mut download, json!({"v":1,"type":"file.fetch","id":Uuid::new_v4(),"transferId":transfer,"ticket":push["ticket"]})).await;
+        assert_eq!(next_text(&mut download).await["type"], "file.accept");
+        let mut received = Vec::new();
+        let end = loop {
+            match timeout(Duration::from_secs(5), download.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()
+            {
+                Message::Binary(chunk) => received.extend_from_slice(&chunk),
+                Message::Text(text) => break serde_json::from_str::<Value>(&text).unwrap(),
+                other => panic!("unexpected {other:?}"),
+            }
+        };
+        assert_eq!(received, png);
+        emit(
+            &mut download,
+            json!({"v":1,"type":"file.progress","transferId":transfer,"received":png.len()}),
+        )
+        .await;
+        emit(&mut download, json!({"v":1,"type":"file.done","id":end["id"],"transferId":transfer,"name":"Imagem do PC.png"})).await;
+        assert_eq!(closed(&mut download).await, Some(CloseCode::Normal));
+        wait_until(|| {
+            core.status()
+                .transfers
+                .first()
+                .is_some_and(|entry| entry.kind == crate::core::TransferKind::Image)
+        })
+        .await;
+        let status = core.status();
+        assert!(status.file_history.is_empty());
+        assert!(status.outgoing_result.is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn real_tls_clipboard_image_upload_goes_to_the_clipboard_not_downloads() {
+        let (server, device, token) = file_server().await;
+        let core = server.core.clone();
+        let written = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = written.clone();
+        core.set_image_writer(Box::new(move |png: &[u8], dib: &[u8], expected| {
+            let mut all = sink.lock().unwrap();
+            if expected == Some(4242) {
+                return Err("conflict".into());
+            }
+            all.push((png.to_vec(), dib.len()));
+            Ok(9000 + all.len() as u32)
+        }));
+        let (mut control, ..) = session_061(&server, device, &token).await;
+        let png = crate::wic::tests::sample_png();
+        // A manual image (Enviar o que copiei): the image limits word the errors.
+        let id = Uuid::new_v4();
+        emit(&mut control, json!({"v":1,"type":"request","id":id,"action":{"kind":"file.offer","transferId":Uuid::new_v4(),"name":"Imagem.png","size":33_554_433u64,"mime":"image/png","clipboard":{"eventId":Uuid::new_v4(),"automatic":false,"baseRevision":0}}})).await;
+        assert_eq!(
+            next_text(&mut control).await,
+            json!({"v":1,"type":"error","id":id,"code":"too_large","message":"Imagem excede 32 MB","retryable":false})
+        );
+        let transfer = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        emit(&mut control, json!({"v":1,"type":"request","id":id,"action":{"kind":"file.offer","transferId":transfer,"name":"Imagem.png","size":png.len(),"mime":"image/png","clipboard":{"eventId":Uuid::new_v4(),"automatic":false,"baseRevision":0}}})).await;
+        let ticket = next_text(&mut control).await;
+        assert_eq!(ticket["type"], "file.ticket");
+        assert_eq!(
+            next_text(&mut control).await,
+            json!({"v":1,"type":"ack","id":id})
+        );
+        let mut upload = begin(&server, transfer, ticket["ticket"].as_str().unwrap()).await;
+        upload
+            .send(Message::Binary(png.clone().into()))
+            .await
+            .unwrap();
+        assert_eq!(next_text(&mut upload).await["received"], png.len());
+        let end = Uuid::new_v4();
+        emit(&mut upload, json!({"v":1,"type":"file.end","id":end,"transferId":transfer,"sha256":hex::encode(Sha256::digest(&png))})).await;
+        assert_eq!(
+            next_text(&mut upload).await,
+            json!({"v":1,"type":"file.done","id":end,"transferId":transfer,"name":"Área de transferência"})
+        );
+        assert_eq!(closed(&mut upload).await, Some(CloseCode::Normal));
+        assert_eq!(written.lock().unwrap()[0].0, png);
+        let state = receive(&mut control, "state").await;
+        assert_eq!(state["clipboardRevision"], 1);
+        let status = core.status();
+        assert!(status.file_history.is_empty());
+        assert_eq!(status.transfers[0].kind, crate::core::TransferKind::Image);
+        // Nothing went to Downloads.
+        let folder = core.received_folder().unwrap();
+        assert!(std::fs::read_dir(&folder).unwrap().next().is_none());
+        assert_eq!(
+            std::fs::read_dir(core.clipboard_folder().unwrap())
+                .unwrap()
+                .count(),
+            0
+        );
+
+        // An automatic image whose clipboard changed meanwhile: conflict on the file socket.
+        emit(&mut control, json!({"v":1,"type":"request","id":Uuid::new_v4(),"action":{"kind":"sync.set","upload":true,"download":true,"paused":false}})).await;
+        receive(&mut control, "ack").await;
+        core.state.lock().unwrap().clipboard_sequence = 4242;
+        let transfer = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        emit(&mut control, json!({"v":1,"type":"request","id":id,"action":{"kind":"file.offer","transferId":transfer,"name":"Imagem.png","size":png.len(),"mime":"image/png","clipboard":{"eventId":Uuid::new_v4(),"automatic":true,"baseRevision":1}}})).await;
+        let ticket = receive(&mut control, "file.ticket").await;
+        let mut upload = begin(&server, transfer, ticket["ticket"].as_str().unwrap()).await;
+        upload
+            .send(Message::Binary(png.clone().into()))
+            .await
+            .unwrap();
+        next_text(&mut upload).await;
+        let end = Uuid::new_v4();
+        emit(&mut upload, json!({"v":1,"type":"file.end","id":end,"transferId":transfer,"sha256":hex::encode(Sha256::digest(&png))})).await;
+        assert_eq!(
+            next_text(&mut upload).await,
+            json!({"v":1,"type":"error","id":end,"code":"conflict","message":"Houve outra cópia antes desta","retryable":false})
+        );
+        assert_eq!(written.lock().unwrap().len(), 1);
+        wait_until(|| {
+            std::fs::read_dir(core.clipboard_folder().unwrap())
+                .unwrap()
+                .count()
+                == 0
+        })
+        .await;
+    }
+
     #[test]
     fn feature_header_tokens_from_every_line() {
         use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -1309,7 +1683,8 @@ mod integration_tests {
                 files: true,
                 files_v2: true,
                 search: true,
-                info: true
+                info: true,
+                ..Features::default()
             }
         );
         assert_eq!(
@@ -1321,6 +1696,10 @@ mod integration_tests {
             }
         );
         assert_eq!(parse(&["files.v1;q=1"]), Features::default());
+        // 0.6.1: clipboard.v2 counts only with files.v2, its transport.
+        let full = parse(&["files.v2", "power.v1", "clipboard.v2"]);
+        assert!(full.power && full.clipboard_image);
+        assert!(!parse(&["files.v1", "clipboard.v2"]).clipboard_image);
         let raw = [b"files.v1 \xff".as_slice()];
         assert_eq!(Features::parse(raw), Features::default());
     }
@@ -1885,16 +2264,45 @@ async fn dispatch(
         return Err("unauthorized".into());
     }
     let done: Result<(), String> = match action {
+        Action::PowerRun {
+            action,
+            delay_seconds,
+        } => {
+            if let energy::Accepted::Now(action) =
+                core.power_run(device, epoch, action, delay_seconds)?
+            {
+                // The ack goes out first; Windows acts half a second later.
+                let later = core.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(energy::IMMEDIATE_DELAY).await;
+                    later.power_execute(action);
+                });
+            }
+            Ok(())
+        }
+        Action::PowerCancel {} => {
+            core.power_cancel();
+            Ok(())
+        }
         Action::FileOffer {
             transfer_id,
             name,
             size,
             mime,
+            clipboard,
         } => {
             let checked = core.clone();
             // The free-space check and folder preparation touch the disk.
             let ticket = tokio::task::spawn_blocking(move || {
-                checked.file_offer(device, epoch, transfer_id, &name, size, &mime)
+                checked.file_offer(
+                    device,
+                    epoch,
+                    transfer_id,
+                    &name,
+                    size,
+                    &mime,
+                    clipboard.as_ref(),
+                )
             })
             .await
             .map_err(|_| "internal")??;
@@ -1999,13 +2407,22 @@ async fn dispatch(
                     "internal".into()
                 }
             }),
-        Action::ClipboardGet => core.clipboard_get(device).map_err(|e| {
-            if ["too_large", "sensitive", "unavailable", "clipboard_busy"].contains(&e.as_str()) {
-                e
-            } else {
-                "internal".into()
-            }
-        }),
+        // An image may be read and converted, so it runs off the async workers.
+        Action::ClipboardGet => {
+            let checked = core.clone();
+            tokio::task::spawn_blocking(move || checked.clipboard_get(device))
+                .await
+                .map_err(|_| "internal")?
+                .map_err(|e| {
+                    if ["too_large", "sensitive", "unavailable", "clipboard_busy"]
+                        .contains(&e.as_str())
+                    {
+                        e
+                    } else {
+                        "internal".into()
+                    }
+                })
+        }
         Action::SyncSet {
             upload,
             download,

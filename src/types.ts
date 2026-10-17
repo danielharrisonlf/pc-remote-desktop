@@ -40,12 +40,27 @@ export interface DiagnosticEntry {
 
 export type TransferDirection = 'toPhone' | 'toPc';
 
-/** Clipboard transfer metadata. The backend never sends the copied text. */
+/** Clipboard transfer metadata. The backend never sends the copied text or image. */
 export interface TransferEntry {
   at: number;
   direction: TransferDirection;
+  /** `image` only with phones that negotiated clipboard.v2 (Android 0.6.1+). */
+  kind: 'text' | 'image';
+  /** Text only; 0 for images. */
   characters: number;
+  /** Images only; 0 for text. */
+  bytes: number;
   automatic: boolean;
+}
+
+export type PowerAction = 'lock' | 'sleep' | 'shutdown' | 'restart';
+
+/** An action a phone scheduled on this PC (power.v1). Kept in RAM by the backend. */
+export interface PowerSchedule {
+  action: PowerAction;
+  /** Unix milliseconds. */
+  dueAt: number;
+  deviceName: string;
 }
 
 /** A file received from (`toPc`) or sent to (`toPhone`) the phone. Metadata only, kept in RAM. */
@@ -104,6 +119,8 @@ export interface DesktopStatus {
   outgoingResult: OutgoingResult | null;
   /** The connected phone accepts files from the PC (Android 0.6+). */
   phoneReceivesFiles: boolean;
+  /** Lock, sleep, shutdown or restart a phone scheduled; null when nothing is scheduled. */
+  powerScheduled: PowerSchedule | null;
 }
 
 /** Mirrors `update::UpdateInfo` in src-tauri/src/update.rs: a newer version from latest.json. */
