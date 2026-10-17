@@ -143,7 +143,7 @@ pub fn write_checked(text: &str, expected_sequence: Option<u32>) -> Result<u32, 
     }
     let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
     open_retry(true)?;
-    let _opened = Opened;
+    let opened = Opened;
     // OpenClipboard excludes other writers. Check here, before allocating or
     // emptying, so a copy whose listener is still pending cannot be overwritten.
     check_write_sequence(expected_sequence, sequence())?;
@@ -161,8 +161,16 @@ pub fn write_checked(text: &str, expected_sequence: Option<u32>) -> Result<u32, 
             let _ = GlobalFree(Some(global));
             return Err("clipboard_busy".into());
         }
-        Ok(GetClipboardSequenceNumber())
     }
+    Ok(closed_sequence(opened))
+}
+
+/// Closes the clipboard and returns the sequence the listener will report. CloseClipboard
+/// adds the synthesized formats (CF_TEXT, CF_LOCALE…) and advances the sequence again, so a
+/// value read while open would make our own write look like a new copy in Windows.
+fn closed_sequence(opened: Opened) -> u32 {
+    drop(opened);
+    sequence()
 }
 
 /// The registered "PNG" format that browsers, Office and the Snipping Tool use.
@@ -267,7 +275,7 @@ pub fn write_image_checked(
     let dib = Owned::copy(dibv5)?;
     let png = Owned::copy(png)?;
     open_retry(true)?;
-    let _opened = Opened;
+    let opened = Opened;
     check_write_sequence(expected_sequence, sequence())?;
     unsafe {
         EmptyClipboard().map_err(|e| e.to_string())?;
@@ -279,8 +287,8 @@ pub fn write_image_checked(
             return Err("clipboard_busy".into());
         }
         png.handed_over();
-        Ok(GetClipboardSequenceNumber())
     }
+    Ok(closed_sequence(opened))
 }
 
 // The message-only window belongs to this thread. No text enters logs or window messages.
@@ -361,6 +369,8 @@ mod tests {
         let _restore = Restore(original);
         let sample = "Olá 👋\nhttps://example.org\n漢字";
         let written_sequence = write(sample).unwrap();
+        // The listener reports the sequence after CloseClipboard; the write returns that one.
+        assert_eq!(written_sequence, sequence());
         assert_eq!(
             write_checked(
                 "must not overwrite the current copy",
@@ -401,6 +411,7 @@ mod tests {
         let png = crate::wic::tests::sample_png();
         let (kept, dib) = crate::wic::clipboard_formats(&png).unwrap();
         let written = write_image_checked(&kept, &dib, None).unwrap();
+        assert_eq!(written, sequence());
         // An automatic write based on an older sequence is refused.
         assert_eq!(
             write_image_checked(&kept, &dib, Some(written.wrapping_sub(1))),
