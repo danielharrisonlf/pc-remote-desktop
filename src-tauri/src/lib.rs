@@ -11,6 +11,7 @@ mod input;
 mod media;
 mod outbox;
 mod pairing;
+pub mod platform;
 mod power;
 mod protocol;
 mod secrets;
@@ -70,10 +71,7 @@ async fn send_files_dialog(
     app: tauri::AppHandle,
     core: tauri::State<'_, Arc<Core>>,
 ) -> Result<Vec<String>, String> {
-    let owner = app
-        .get_webview_window("main")
-        .and_then(|window| window.hwnd().ok())
-        .map_or(0, |hwnd| hwnd.0 as isize);
+    let owner = platform::window_owner(&app);
     let paths = tauri::async_runtime::spawn_blocking(move || dialog::pick_files(owner))
         .await
         .map_err(|_| "Não foi possível abrir a escolha de arquivos.".to_string())??;

@@ -30,7 +30,8 @@ pub fn validate(url: &str) -> Result<(), String> {
 
 pub fn open(url: &str) -> Result<(), String> {
     validate(url)?;
-    shell_open(&windows::core::HSTRING::from(url))
+    crate::platform::system()
+        .open_url(url)
         .map_err(|()| "Não foi possível abrir o navegador padrão.".into())
 }
 
@@ -56,51 +57,20 @@ pub fn youtube_search_url(query: &str) -> String {
     format!("{YOUTUBE_SEARCH}{}", form_encode(query))
 }
 
-/// Opens the search in the default browser. Runs on a blocking thread, so it sets up COM for ShellExecute.
+/// Opens the search in the default browser.
 pub fn open_youtube_search(query: &str) -> Result<(), ()> {
-    use windows::Win32::System::Com::{
-        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
-    };
     let url = youtube_search_url(query);
-    let initialized =
-        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) }.is_ok();
-    let opened = shell_open(&windows::core::HSTRING::from(url.as_str()));
-    if initialized {
-        unsafe { CoUninitialize() };
-    }
-    opened
+    crate::platform::system().open_youtube_url(&url)
 }
 
-/// Opens a directory in Explorer. The caller passes the app's own received-files folder.
+/// Opens a directory in the system file manager. The caller passes the app's own received-files folder.
 pub fn open_folder(folder: &std::path::Path) -> Result<(), String> {
     if !folder.is_dir() {
         return Err("Pasta não encontrada.".into());
     }
-    shell_open(&windows::core::HSTRING::from(folder))
+    crate::platform::system()
+        .open_folder(folder)
         .map_err(|()| "Não foi possível abrir a pasta no Explorador.".into())
-}
-
-fn shell_open(target: &windows::core::HSTRING) -> Result<(), ()> {
-    use windows::core::{HSTRING, PCWSTR};
-    use windows::Win32::UI::Shell::ShellExecuteW;
-    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-    let operation = HSTRING::from("open");
-    // ShellExecute returns a value greater than 32 on success.
-    let result = unsafe {
-        ShellExecuteW(
-            None,
-            &operation,
-            target,
-            PCWSTR::null(),
-            PCWSTR::null(),
-            SW_SHOWNORMAL,
-        )
-    };
-    if result.0 as isize > 32 {
-        Ok(())
-    } else {
-        Err(())
-    }
 }
 
 #[cfg(test)]

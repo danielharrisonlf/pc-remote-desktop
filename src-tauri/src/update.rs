@@ -322,7 +322,7 @@ pub async fn update_install(app: AppHandle, state: State<'_, UpdateState>) -> Re
     installed.map_err(|error| failure(&app, Stage::Install, &error))?;
     // Only reached if install() returns instead of exiting. On Windows the installer
     // relaunches the app; elsewhere the new version is already in place.
-    if cfg!(windows) {
+    if !crate::platform::system().exit_after_update_install() {
         app.exit(0);
         return Ok(());
     }

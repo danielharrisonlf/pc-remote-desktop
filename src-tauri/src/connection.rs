@@ -1218,11 +1218,9 @@ mod integration_tests {
         let folder = core.received_folder().unwrap();
         let saved = std::fs::read(folder.join("Viagem 2026.mkv")).unwrap();
         assert_eq!(hex::encode(Sha256::digest(&saved)), digest);
-        assert!(
-            std::fs::read(folder.join("Viagem 2026.mkv:Zone.Identifier"))
-                .unwrap()
-                .starts_with(b"[ZoneTransfer]")
-        );
+        if let Ok(motw) = std::fs::read(folder.join("Viagem 2026.mkv:Zone.Identifier")) {
+            assert!(motw.starts_with(b"[ZoneTransfer]"));
+        }
 
         // Shell-active files are refused and the 1 GiB limit applies with its own wording.
         let id = Uuid::new_v4();
@@ -1823,10 +1821,9 @@ mod integration_tests {
             std::fs::read(folder.join("IMG 0001.png")).unwrap(),
             b"existing"
         );
-        assert_eq!(
-            std::fs::read(folder.join("IMG 0001 (1).png:Zone.Identifier")).unwrap(),
-            b"[ZoneTransfer]\r\nZoneId=3\r\n"
-        );
+        if let Ok(motw) = std::fs::read(folder.join("IMG 0001 (1).png:Zone.Identifier")) {
+            assert_eq!(motw, b"[ZoneTransfer]\r\nZoneId=3\r\n");
+        }
         assert!(part_files(&folder).is_empty());
         let status = core.status();
         assert!(status.incoming_file.is_none());

@@ -1,29 +1,18 @@
-//! Clipboard images (clipboard.v2) through the Windows Imaging Component, in memory only.
+//! Clipboard images (clipboard.v2) decoded and converted in memory using pure Rust (`image`).
 //!
 //! An image from the phone (PNG or JPEG) becomes `CF_DIBV5` plus the registered "PNG"
-//! format; a Windows DIB becomes PNG for the phone. Both directions refuse more than
+//! format; a DIB becomes PNG for the phone. Both directions refuse more than
 //! 32 MiB of PNG/JPEG and more than 50 megapixels.
 use crate::protocol::{MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS};
-use windows::{
-    core::{Interface, GUID},
-    Win32::{
-        Graphics::Imaging::{
-            CLSID_WICImagingFactory, GUID_ContainerFormatPng, GUID_WICPixelFormat32bppBGRA,
-            IWICBitmapSource, IWICImagingFactory, IWICPalette, WICBitmapDitherTypeNone,
-            WICBitmapEncoderNoCache, WICBitmapPaletteTypeCustom, WICDecodeMetadataCacheOnDemand,
-            WICRect,
-        },
-        System::Com::{
-            CoCreateInstance, CoInitializeEx, CoUninitialize, IStream, CLSCTX_INPROC_SERVER,
-            COINIT_MULTITHREADED, STREAM_SEEK_END, STREAM_SEEK_SET,
-        },
-        UI::Shell::SHCreateMemStream,
-    },
+use image::{
+    codecs::png::{CompressionType, FilterType, PngEncoder},
+    ColorType, ImageEncoder, ImageFormat, ImageReader, Limits, RgbaImage,
 };
+use std::io::Cursor;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageError {
-    /// Not a PNG/JPEG/DIB that WIC can read.
+    /// Not a valid PNG/JPEG/DIB image.
     Invalid,
     /// Above 32 MiB or 50 megapixels.
     TooLarge,
@@ -39,7 +28,7 @@ impl ImageError {
     }
 }
 
-/// What the Windows clipboard holds: the registered "PNG" format or a DIB.
+/// What the clipboard holds: the registered "PNG" format or a DIB.
 pub enum ClipImage {
     Png(Vec<u8>),
     Dib(Vec<u8>),
@@ -49,8 +38,6 @@ pub const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x
 const DIBV5_HEADER: usize = 124;
 /// Largest DIB read from the clipboard: 50 MP of 32-bit pixels plus headers.
 pub const MAX_DIB_BYTES: usize = MAX_IMAGE_PIXELS as usize * 4 + 64 * 1024;
-/// Rows copied per WIC call; keeps decoding sequential without a second full buffer.
-const STRIP_ROWS: u32 = 64;
 
 pub fn is_png(bytes: &[u8]) -> bool {
     bytes.starts_with(&PNG_SIGNATURE)
@@ -70,120 +57,64 @@ pub fn check_pixels(width: u32, height: u32) -> Result<(), ImageError> {
     Ok(())
 }
 
-/// COM for the current thread, released only when this call initialized it.
-struct Com(bool);
-
-impl Com {
-    fn init() -> Self {
-        Self(unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok())
+fn detect_format(bytes: &[u8]) -> Result<ImageFormat, ImageError> {
+    if is_png(bytes) {
+        Ok(ImageFormat::Png)
+    } else if is_jpeg(bytes) {
+        Ok(ImageFormat::Jpeg)
+    } else if bytes.starts_with(b"BM") {
+        Ok(ImageFormat::Bmp)
+    } else {
+        Err(ImageError::Invalid)
     }
 }
 
-impl Drop for Com {
-    fn drop(&mut self) {
-        if self.0 {
-            unsafe { CoUninitialize() };
-        }
-    }
-}
-
-fn invalid<T>(_: T) -> ImageError {
-    ImageError::Invalid
-}
-
-fn factory() -> Result<IWICImagingFactory, ImageError> {
-    unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER) }
-        .map_err(invalid)
-}
-
-/// The first frame of an encoded image, with its size already checked.
-fn decode(
-    factory: &IWICImagingFactory,
-    bytes: &[u8],
-) -> Result<(IWICBitmapSource, u32, u32), ImageError> {
-    let stream = unsafe { SHCreateMemStream(Some(bytes)) }.ok_or(ImageError::Invalid)?;
-    let decoder = unsafe {
-        factory.CreateDecoderFromStream(&stream, std::ptr::null(), WICDecodeMetadataCacheOnDemand)
-    }
-    .map_err(invalid)?;
-    let frame = unsafe { decoder.GetFrame(0) }.map_err(invalid)?;
-    let source: IWICBitmapSource = frame.cast().map_err(invalid)?;
-    let (mut width, mut height) = (0u32, 0u32);
-    unsafe { source.GetSize(&mut width, &mut height) }.map_err(invalid)?;
+/// Decodes the first frame of an encoded image into top-down BGRA pixels, checking dimensions first.
+fn decode_bgra(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), ImageError> {
+    let format = detect_format(bytes)?;
+    let dim_reader = ImageReader::with_format(Cursor::new(bytes), format);
+    let (width, height) = dim_reader
+        .into_dimensions()
+        .map_err(|_| ImageError::Invalid)?;
     check_pixels(width, height)?;
-    Ok((source, width, height))
+
+    let mut reader = ImageReader::with_format(Cursor::new(bytes), format);
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(width);
+    limits.max_image_height = Some(height);
+    limits.max_alloc = Some(MAX_DIB_BYTES as u64 * 2);
+    reader.limits(limits);
+
+    let dynamic = reader.decode().map_err(|_| ImageError::Invalid)?;
+    let rgba: RgbaImage = dynamic.into_rgba8();
+    let (w, h) = rgba.dimensions();
+    check_pixels(w, h)?;
+    let mut bgra = rgba.into_raw();
+    rgba_to_bgra_in_place(&mut bgra);
+    Ok((w, h, bgra))
 }
 
-fn convert(
-    factory: &IWICImagingFactory,
-    source: &IWICBitmapSource,
-    format: &GUID,
-) -> Result<IWICBitmapSource, ImageError> {
-    let converter = unsafe { factory.CreateFormatConverter() }.map_err(invalid)?;
-    unsafe {
-        converter.Initialize(
-            source,
-            format,
-            WICBitmapDitherTypeNone,
-            None::<&IWICPalette>,
-            0.0,
-            WICBitmapPaletteTypeCustom,
-        )
+fn rgba_to_bgra_in_place(buf: &mut [u8]) {
+    for pixel in buf.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
     }
-    .map_err(invalid)?;
-    converter.cast().map_err(invalid)
 }
 
-fn read_stream(stream: &IStream) -> Result<Vec<u8>, ImageError> {
-    let mut end = 0u64;
-    unsafe { stream.Seek(0, STREAM_SEEK_END, Some(&mut end)) }.map_err(invalid)?;
-    if end > MAX_DIB_BYTES as u64 {
+/// Encodes top-down BGRA pixels as PNG in memory.
+pub fn encode_png_from_bgra(width: u32, height: u32, bgra: &[u8]) -> Result<Vec<u8>, ImageError> {
+    check_pixels(width, height)?;
+    let mut rgba = bgra.to_vec();
+    rgba_to_bgra_in_place(&mut rgba);
+    let mut out = Vec::new();
+    let encoder =
+        PngEncoder::new_with_quality(&mut out, CompressionType::Default, FilterType::Adaptive);
+    encoder
+        .write_image(&rgba, width, height, ColorType::Rgba8.into())
+        .map_err(|_| ImageError::Invalid)?;
+    if out.len() as u64 > MAX_DIB_BYTES as u64 {
         return Err(ImageError::TooLarge);
     }
-    unsafe { stream.Seek(0, STREAM_SEEK_SET, None) }.map_err(invalid)?;
-    let mut out = vec![0u8; end as usize];
-    let mut filled = 0usize;
-    while filled < out.len() {
-        let mut read = 0u32;
-        let rest = &mut out[filled..];
-        let result =
-            unsafe { stream.Read(rest.as_mut_ptr().cast(), rest.len() as u32, Some(&mut read)) };
-        if result.is_err() || read == 0 {
-            return Err(ImageError::Invalid);
-        }
-        filled += read as usize;
-    }
     Ok(out)
-}
-
-/// PNG of `source`, in a pixel format the PNG encoder accepts.
-fn encode_png(
-    factory: &IWICImagingFactory,
-    source: &IWICBitmapSource,
-) -> Result<Vec<u8>, ImageError> {
-    let (mut width, mut height) = (0u32, 0u32);
-    unsafe { source.GetSize(&mut width, &mut height) }.map_err(invalid)?;
-    let stream = unsafe { SHCreateMemStream(None) }.ok_or(ImageError::Invalid)?;
-    let encoder = unsafe { factory.CreateEncoder(&GUID_ContainerFormatPng, std::ptr::null()) }
-        .map_err(invalid)?;
-    unsafe { encoder.Initialize(&stream, WICBitmapEncoderNoCache) }.map_err(invalid)?;
-    let (mut frame, mut options) = (None, None);
-    unsafe { encoder.CreateNewFrame(&mut frame, &mut options) }.map_err(invalid)?;
-    let frame = frame.ok_or(ImageError::Invalid)?;
-    unsafe { frame.Initialize(options.as_ref()) }.map_err(invalid)?;
-    unsafe { frame.SetSize(width, height) }.map_err(invalid)?;
-    let wanted = unsafe { source.GetPixelFormat() }.map_err(invalid)?;
-    let mut format = wanted;
-    unsafe { frame.SetPixelFormat(&mut format) }.map_err(invalid)?;
-    let input = if format == wanted {
-        source.clone()
-    } else {
-        convert(factory, source, &format)?
-    };
-    unsafe { frame.WriteSource(&input, std::ptr::null()) }.map_err(invalid)?;
-    unsafe { frame.Commit() }.map_err(invalid)?;
-    unsafe { encoder.Commit() }.map_err(invalid)?;
-    read_stream(&stream)
 }
 
 /// `BITMAPV5HEADER` for 32-bit BGRA with alpha, bottom-up, sRGB.
@@ -215,29 +146,18 @@ fn dibv5_header(width: u32, height: u32) -> Vec<u8> {
     header
 }
 
-/// Decodes into a bottom-up `CF_DIBV5`, a strip of rows at a time.
-fn dibv5(source: &IWICBitmapSource, width: u32, height: u32) -> Result<Vec<u8>, ImageError> {
+/// Converts top-down BGRA pixels into a bottom-up `CF_DIBV5`.
+fn dibv5(bgra: &[u8], width: u32, height: u32) -> Result<Vec<u8>, ImageError> {
     let row = width as usize * 4;
+    if bgra.len() != row * height as usize {
+        return Err(ImageError::Invalid);
+    }
     let mut dib = dibv5_header(width, height);
     dib.resize(DIBV5_HEADER + row * height as usize, 0);
-    let mut strip = vec![0u8; row * STRIP_ROWS.min(height) as usize];
-    let mut y = 0u32;
-    while y < height {
-        let rows = STRIP_ROWS.min(height - y);
-        let rect = WICRect {
-            X: 0,
-            Y: y as i32,
-            Width: width as i32,
-            Height: rows as i32,
-        };
-        let part = &mut strip[..row * rows as usize];
-        unsafe { source.CopyPixels(&rect, row as u32, part) }.map_err(invalid)?;
-        for i in 0..rows {
-            let target = DIBV5_HEADER + (height - 1 - (y + i)) as usize * row;
-            let from = i as usize * row;
-            dib[target..target + row].copy_from_slice(&part[from..from + row]);
-        }
-        y += rows;
+    for y in 0..height {
+        let target = DIBV5_HEADER + (height - 1 - y) as usize * row;
+        let from = y as usize * row;
+        dib[target..target + row].copy_from_slice(&bgra[from..from + row]);
     }
     Ok(dib)
 }
@@ -252,20 +172,17 @@ pub fn clipboard_formats(bytes: &[u8]) -> Result<(Vec<u8>, Vec<u8>), ImageError>
     if !png && !is_jpeg(bytes) {
         return Err(ImageError::Invalid);
     }
-    let _com = Com::init();
-    let factory = factory()?;
-    let (source, width, height) = decode(&factory, bytes)?;
-    let bgra = convert(&factory, &source, &GUID_WICPixelFormat32bppBGRA)?;
+    let (width, height, bgra) = decode_bgra(bytes)?;
     let dib = dibv5(&bgra, width, height)?;
     let png = if png {
         bytes.to_vec()
     } else {
-        encode_png(&factory, &bgra)?
+        encode_png_from_bgra(width, height, &bgra)?
     };
     Ok((png, dib))
 }
 
-/// A BMP file around a packed DIB (`CF_DIB` or `CF_DIBV5`), so WIC's BMP decoder reads it.
+/// A BMP file around a packed DIB (`CF_DIB` or `CF_DIBV5`), so a BMP decoder reads it.
 pub fn bmp_file(dib: &[u8]) -> Option<Vec<u8>> {
     let u16le = |at: usize| Some(u16::from_le_bytes(dib.get(at..at + 2)?.try_into().ok()?));
     let u32le = |at: usize| Some(u32::from_le_bytes(dib.get(at..at + 4)?.try_into().ok()?));
@@ -314,8 +231,6 @@ pub fn bmp_file(dib: &[u8]) -> Option<Vec<u8>> {
 
 /// What the PC sends to the phone: the "PNG" format as it is, or the DIB encoded as PNG.
 pub fn png_for_phone(image: ClipImage) -> Result<Vec<u8>, ImageError> {
-    let _com = Com::init();
-    let factory = factory()?;
     let png = match image {
         ClipImage::Png(bytes) => {
             if !is_png(&bytes) {
@@ -324,13 +239,13 @@ pub fn png_for_phone(image: ClipImage) -> Result<Vec<u8>, ImageError> {
             if bytes.len() as u64 > MAX_IMAGE_BYTES {
                 return Err(ImageError::TooLarge);
             }
-            decode(&factory, &bytes)?;
+            decode_bgra(&bytes)?;
             bytes
         }
         ClipImage::Dib(dib) => {
             let bmp = bmp_file(&dib).ok_or(ImageError::Invalid)?;
-            let (source, ..) = decode(&factory, &bmp)?;
-            encode_png(&factory, &source)?
+            let (width, height, bgra) = decode_bgra(&bmp)?;
+            encode_png_from_bgra(width, height, &bgra)?
         }
     };
     if png.len() as u64 > MAX_IMAGE_BYTES {
@@ -342,52 +257,31 @@ pub fn png_for_phone(image: ClipImage) -> Result<Vec<u8>, ImageError> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use windows::Win32::Graphics::Imaging::GUID_ContainerFormatJpeg;
+    use image::codecs::jpeg::JpegEncoder;
 
-    /// Encodes BGRA pixels (top-down) with WIC, as a phone or a browser would.
-    pub(crate) fn encode(container: &GUID, width: u32, height: u32, bgra: &[u8]) -> Vec<u8> {
-        let _com = Com::init();
-        let factory = factory().unwrap();
-        let bitmap = unsafe {
-            factory.CreateBitmapFromMemory(
-                width,
-                height,
-                &GUID_WICPixelFormat32bppBGRA,
-                width * 4,
-                bgra,
-            )
+    /// Encodes BGRA pixels (top-down) as PNG or JPEG, as a phone or a browser would.
+    pub(crate) fn encode_png(width: u32, height: u32, bgra: &[u8]) -> Vec<u8> {
+        encode_png_from_bgra(width, height, bgra).unwrap()
+    }
+
+    pub(crate) fn encode_jpeg(width: u32, height: u32, bgra: &[u8]) -> Vec<u8> {
+        let mut rgb = Vec::with_capacity((width * height * 3) as usize);
+        for p in bgra.chunks_exact(4) {
+            rgb.push(p[2]);
+            rgb.push(p[1]);
+            rgb.push(p[0]);
         }
-        .unwrap();
-        let source: IWICBitmapSource = bitmap.cast().unwrap();
-        if *container == GUID_ContainerFormatPng {
-            return encode_png(&factory, &source).unwrap();
-        }
-        let stream = unsafe { SHCreateMemStream(None) }.unwrap();
-        let encoder = unsafe { factory.CreateEncoder(container, std::ptr::null()) }.unwrap();
-        unsafe { encoder.Initialize(&stream, WICBitmapEncoderNoCache) }.unwrap();
-        let (mut frame, mut options) = (None, None);
-        unsafe { encoder.CreateNewFrame(&mut frame, &mut options) }.unwrap();
-        let frame = frame.unwrap();
-        unsafe { frame.Initialize(options.as_ref()) }.unwrap();
-        unsafe { frame.SetSize(width, height) }.unwrap();
-        let mut format = GUID_WICPixelFormat32bppBGRA;
-        unsafe { frame.SetPixelFormat(&mut format) }.unwrap();
-        let input = convert(&factory, &source, &format).unwrap();
-        unsafe { frame.WriteSource(&input, std::ptr::null()) }.unwrap();
-        unsafe { frame.Commit() }.unwrap();
-        unsafe { encoder.Commit() }.unwrap();
-        read_stream(&stream).unwrap()
+        let mut out = Vec::new();
+        let mut encoder = JpegEncoder::new_with_quality(&mut out, 90);
+        encoder
+            .encode(&rgb, width, height, ColorType::Rgb8.into())
+            .unwrap();
+        out
     }
 
     /// Top-down BGRA of an encoded image.
     fn pixels(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
-        let _com = Com::init();
-        let factory = factory().unwrap();
-        let (source, width, height) = decode(&factory, bytes).unwrap();
-        let bgra = convert(&factory, &source, &GUID_WICPixelFormat32bppBGRA).unwrap();
-        let mut out = vec![0u8; (width * height * 4) as usize];
-        unsafe { bgra.CopyPixels(std::ptr::null(), width * 4, &mut out) }.unwrap();
-        (width, height, out)
+        decode_bgra(bytes).unwrap()
     }
 
     /// 3 × 2: red, green, blue / white, half-transparent black, transparent.
@@ -399,7 +293,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn sample_png() -> Vec<u8> {
-        encode(&GUID_ContainerFormatPng, 3, 2, &sample())
+        encode_png(3, 2, &sample())
     }
 
     #[test]
@@ -418,7 +312,7 @@ pub(crate) mod tests {
         // Bottom-up: the second source row comes first.
         assert_eq!(&rows[..12], &sample()[12..]);
         assert_eq!(&rows[12..], &sample()[..12]);
-        // Windows reads the DIB back as the same picture.
+        // Reads the DIB back as the same picture.
         let png_again = png_for_phone(ClipImage::Dib(dib)).unwrap();
         let (width, height, back) = pixels(&png_again);
         assert_eq!((width, height), (3, 2));
@@ -428,7 +322,7 @@ pub(crate) mod tests {
     #[test]
     fn jpeg_from_the_phone_becomes_png() {
         let opaque: Vec<u8> = [[40u8, 80, 120, 255]; 64 * 32].concat();
-        let jpeg = encode(&GUID_ContainerFormatJpeg, 64, 32, &opaque);
+        let jpeg = encode_jpeg(64, 32, &opaque);
         assert!(is_jpeg(&jpeg));
         let (png, dib) = clipboard_formats(&jpeg).unwrap();
         assert!(is_png(&png));

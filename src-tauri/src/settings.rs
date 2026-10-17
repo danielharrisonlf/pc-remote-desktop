@@ -85,11 +85,11 @@ fn encode(settings: &Settings) -> Result<Vec<u8>, String> {
 }
 
 fn path() -> Result<PathBuf, String> {
-    let base = std::env::var_os("APPDATA").ok_or("APPDATA unavailable")?;
-    let dir = PathBuf::from(base).join("PC Remote");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join("settings.json"))
+    Ok(crate::platform::system()
+        .config_dir()?
+        .join("settings.json"))
 }
+
 pub fn load() -> Settings {
     path()
         .ok()
@@ -97,6 +97,7 @@ pub fn load() -> Settings {
         .and_then(|b| parse(&b))
         .unwrap_or_default()
 }
+
 pub fn save(settings: &Settings) -> Result<(), String> {
     let p = path()?;
     let tmp = p.with_extension("tmp");
@@ -105,29 +106,9 @@ pub fn save(settings: &Settings) -> Result<(), String> {
 }
 
 pub fn set_autostart(enabled: bool) -> Result<(), String> {
-    use windows_registry::{Key, CURRENT_USER};
-    let key: Key = CURRENT_USER
-        .create("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
-        .map_err(|e| e.to_string())?;
-    if enabled {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        key.set_string("PC Remote", format!("\"{}\"", exe.display()))
-            .map_err(|e| e.to_string())
-    } else {
-        match key.remove_value("PC Remote") {
-            Ok(()) => Ok(()),
-            Err(error)
-                if error.code().0
-                    == windows::core::HRESULT::from_win32(
-                        windows::Win32::Foundation::ERROR_FILE_NOT_FOUND.0,
-                    )
-                    .0 =>
-            {
-                Ok(())
-            }
-            Err(error) => Err(error.to_string()),
-        }
-    }
+    crate::platform::autostart()
+        .set_enabled(enabled)
+        .map_err(|e| e.into_legacy_message())
 }
 
 #[cfg(test)]

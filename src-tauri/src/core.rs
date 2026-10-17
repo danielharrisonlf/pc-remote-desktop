@@ -298,11 +298,9 @@ impl Core {
         files_root: Option<PathBuf>,
     ) -> Arc<Self> {
         let (events, _) = broadcast::channel(64);
-        let name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC Windows".into());
+        let name = crate::platform::system().hostname();
         Arc::new(Self {
-            last_live_tick: AtomicU64::new(unsafe {
-                windows::Win32::System::SystemInformation::GetTickCount64()
-            }),
+            last_live_tick: AtomicU64::new(crate::platform::system().monotonic_ms()),
             state: Mutex::new(Runtime {
                 service_running: false,
                 secrets,
@@ -889,7 +887,7 @@ impl Core {
         self.state.lock().unwrap().service_running = running;
     }
     pub fn check_resume(&self) {
-        let now = unsafe { windows::Win32::System::SystemInformation::GetTickCount64() };
+        let now = crate::platform::system().monotonic_ms();
         let last = self.last_live_tick.fetch_max(now, Ordering::AcqRel);
         if now.saturating_sub(last) <= 5_000 {
             return;
@@ -1107,7 +1105,7 @@ mod tests {
         let epoch = core
             .connect_authenticated(id, &token, Features::legacy(false, false))
             .unwrap();
-        let now = unsafe { windows::Win32::System::SystemInformation::GetTickCount64() };
+        let now = crate::platform::system().monotonic_ms();
         core.last_live_tick
             .store(now.saturating_sub(6_000), Ordering::Release);
         core.check_resume();

@@ -13,7 +13,6 @@ use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, BufWriter, Write},
-    os::windows::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::{atomic::Ordering, Arc},
     time::{Duration, Instant},
@@ -21,17 +20,6 @@ use std::{
 use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::tungstenite::Bytes;
 use uuid::Uuid;
-use windows::{
-    core::HSTRING,
-    Win32::{
-        Foundation::{ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS},
-        Storage::FileSystem::{
-            GetDiskFreeSpaceExW, MoveFileExW, FILE_ATTRIBUTE_REPARSE_POINT, MOVEFILE_WRITE_THROUGH,
-        },
-        System::Com::CoTaskMemFree,
-        UI::Shell::{FOLDERID_Downloads, SHGetKnownFolderPath, KF_FLAG_DEFAULT},
-    },
-};
 
 pub const TICKET_TTL: Duration = Duration::from_secs(30);
 pub const FOLDER_NAME: &str = "PC Remote";
@@ -41,7 +29,6 @@ const MAX_RECEIVED: usize = 12;
 const MAX_STEM_CHARS: usize = 100;
 const PART_SUFFIX: &str = ".pcremote-part";
 const SIGNATURE_WINDOW: usize = 1024;
-const MARK_OF_THE_WEB: &[u8] = b"[ZoneTransfer]\r\nZoneId=3\r\n";
 
 /// Extensions Explorer acts on just by listing the folder (icons, shell links),
 /// refused even though files.v2 accepts any type. `desktop.ini` is checked by name.
@@ -153,7 +140,7 @@ impl SafeName {
         self
     }
     /// `name.ext`, `name (1).ext` … `name (99).ext`, then `name <8 id chars>.ext`.
-    fn candidates(&self, transfer_id: Uuid) -> impl Iterator<Item = String> + '_ {
+    pub fn candidates(&self, transfer_id: Uuid) -> impl Iterator<Item = String> + '_ {
         let suffix = transfer_id.to_string()[..8].to_string();
         std::iter::once(self.file_name())
             .chain((1..=99).map(move |n| self.with_stem_suffix(&format!(" ({n})"))))
@@ -691,25 +678,11 @@ impl Core {
 }
 
 fn downloads_folder() -> Option<PathBuf> {
-    use std::os::windows::ffi::OsStringExt;
-    let known = unsafe {
-        SHGetKnownFolderPath(&FOLDERID_Downloads, KF_FLAG_DEFAULT, None)
-            .ok()
-            .map(|path| {
-                let value = std::ffi::OsString::from_wide(path.as_wide());
-                CoTaskMemFree(Some(path.0 as *const _));
-                PathBuf::from(value)
-            })
-    };
-    known.filter(|path| path.is_absolute()).or_else(|| {
-        std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join("Downloads"))
-    })
+    crate::platform::system().downloads_dir()
 }
 
 fn plain_directory(meta: &fs::Metadata) -> bool {
-    meta.is_dir()
-        && !meta.file_type().is_symlink()
-        && meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 == 0
+    crate::platform::system().is_plain_directory(meta)
 }
 
 pub fn ensure_plain_folder(folder: &Path) -> Result<(), String> {
@@ -745,10 +718,7 @@ fn remove_stale_parts(folder: &Path) {
 }
 
 fn free_bytes(folder: &Path) -> Result<u64, String> {
-    let mut free = 0u64;
-    unsafe { GetDiskFreeSpaceExW(&HSTRING::from(folder), Some(&mut free), None, None) }
-        .map_err(|e| e.message())?;
-    Ok(free)
+    crate::platform::system().free_disk_bytes(folder)
 }
 
 pub fn part_path(folder: &Path, transfer_id: Uuid) -> PathBuf {
@@ -816,15 +786,7 @@ pub fn read_for_send(
 }
 
 fn mark_of_the_web(path: &Path) -> io::Result<()> {
-    let mut stream = path.as_os_str().to_owned();
-    stream.push(":Zone.Identifier");
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(PathBuf::from(stream))?;
-    file.write_all(MARK_OF_THE_WEB)?;
-    file.sync_all()
+    crate::platform::system().mark_of_the_web(path)
 }
 
 /// Flushes, marks as downloaded from the internet and moves to a free name.
@@ -842,25 +804,14 @@ pub fn finalize(
     move_unique(part, folder, name, transfer_id)
 }
 
-/// Never replaces an existing file: MoveFileExW without MOVEFILE_REPLACE_EXISTING.
+/// Never replaces an existing file.
 pub fn move_unique(
     from: &Path,
     folder: &Path,
     name: &SafeName,
     transfer_id: Uuid,
 ) -> Result<String, String> {
-    let source = HSTRING::from(from);
-    for candidate in name.candidates(transfer_id) {
-        let target = HSTRING::from(folder.join(&candidate).as_path());
-        match unsafe { MoveFileExW(&source, &target, MOVEFILE_WRITE_THROUGH) } {
-            Ok(()) => return Ok(candidate),
-            Err(error)
-                if error.code() == ERROR_ALREADY_EXISTS.to_hresult()
-                    || error.code() == ERROR_FILE_EXISTS.to_hresult() => {}
-            Err(error) => return Err(error.message()),
-        }
-    }
-    Err("nenhum nome livre".into())
+    crate::platform::system().move_file_unique(from, folder, name, transfer_id)
 }
 
 #[cfg(test)]
@@ -1095,10 +1046,9 @@ pub(crate) mod tests {
             fs::read(folder.join("doc.pdf")).unwrap(),
             b"%PDF-1.4 conteudo"
         );
-        assert_eq!(
-            fs::read(folder.join("doc.pdf:Zone.Identifier")).unwrap(),
-            MARK_OF_THE_WEB
-        );
+        if let Ok(motw) = fs::read(folder.join("doc.pdf:Zone.Identifier")) {
+            assert_eq!(motw, b"[ZoneTransfer]\r\nZoneId=3\r\n");
+        }
         fs::remove_dir_all(folder).unwrap();
     }
 
