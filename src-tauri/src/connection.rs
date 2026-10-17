@@ -92,6 +92,7 @@ pub async fn serve(core: Arc<Core>, config: ServerConfig) -> Result<(), String> 
     let slots = Arc::new(Semaphore::new(16));
     loop {
         let (stream, _) = listener.accept().await.map_err(|e| e.to_string())?;
+        let _ = stream.set_nodelay(true);
         let Ok(permit) = slots.clone().try_acquire_owned() else {
             continue;
         };
@@ -272,6 +273,10 @@ async fn control(core: Arc<Core>, mut ws: ServerSocket, features: Features) -> R
                         first_valid_message=true;device=Some(device_id);cleanup.device=device;cleanup.epoch=epoch;let status=core.status();
                         let mut capabilities = vec!["audio", "media", "clipboard.text"];
                         if features.input { capabilities.push("input.control"); }
+                        if features.input && features.numpad { capabilities.push("input.numpad"); }
+                        if features.input && features.presentation { capabilities.push("presentation.control"); }
+                        if features.input && features.deck { capabilities.push("deck.control"); }
+                        if features.wol { capabilities.push("wol.target"); }
                         if features.files { capabilities.push("file.transfer"); }
                         if features.files_v2 { capabilities.push("file.receive"); }
                         if features.search { capabilities.push("search.youtube"); }
@@ -279,6 +284,7 @@ async fn control(core: Arc<Core>, mut ws: ServerSocket, features: Features) -> R
                         if features.clipboard_image { capabilities.push("clipboard.image"); }
                         let mut welcome = json!({"v":1,"type":"welcome","id":id,"pcId":status.pc_id,"pcName":status.pc_name,"capabilities":capabilities});
                         if features.info { welcome["os"] = json!(crate::system::os_name()); }
+                        if features.wol { welcome["macs"] = json!(crate::system::mac_addresses()); }
                         send(&mut ws,welcome).await?;
                         send(&mut ws,serde_json::to_value(core.snapshot()).map_err(|e|e.to_string())?).await?;
                         // A push queued while no phone was connected goes out after the first snapshot.
@@ -2433,7 +2439,9 @@ async fn dispatch(
         | Action::PointerClick { .. }
         | Action::PointerScroll { .. }
         | Action::KeyboardText { .. }
-        | Action::KeyboardKey { .. }) => {
+        | Action::KeyboardKey { .. }
+        | Action::PresentationControl { .. }
+        | Action::DeckTrigger { .. }) => {
             let checked = core.clone();
             tokio::task::spawn_blocking(move || {
                 checked.check_resume();

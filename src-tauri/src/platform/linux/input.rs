@@ -4,7 +4,7 @@
 //! gracefully to `xdotool` (`libxdo`), `ydotool`, or `wtype` on Wayland without ever panicking.
 use crate::{
     platform::{InputBackend, PlatformError},
-    protocol::{KeyboardKey, PointerButton},
+    protocol::{DeckAction, KeyboardKey, PointerButton, PresentationCommand},
 };
 use std::{process::Command, sync::Mutex};
 use x11rb::{
@@ -29,17 +29,34 @@ static X11_LOCK: Mutex<()> = Mutex::new(());
 /// Standard X11 keysyms for named protocol keys.
 pub(crate) fn keysym_for(key: KeyboardKey) -> u32 {
     match key {
-        KeyboardKey::Enter => 0xff0d,     // XK_Return
-        KeyboardKey::Backspace => 0xff08, // XK_BackSpace
-        KeyboardKey::Tab => 0xff09,       // XK_Tab
-        KeyboardKey::Escape => 0xff1b,    // XK_Escape
-        KeyboardKey::Left => 0xff51,      // XK_Left
-        KeyboardKey::Up => 0xff52,        // XK_Up
-        KeyboardKey::Right => 0xff53,     // XK_Right
-        KeyboardKey::Down => 0xff54,      // XK_Down
-        KeyboardKey::Delete => 0xffff,    // XK_Delete
-        KeyboardKey::Home => 0xff50,      // XK_Home
-        KeyboardKey::End => 0xff57,       // XK_End
+        KeyboardKey::Enter => 0xff0d,          // XK_Return
+        KeyboardKey::Backspace => 0xff08,      // XK_BackSpace
+        KeyboardKey::Tab => 0xff09,            // XK_Tab
+        KeyboardKey::Escape => 0xff1b,         // XK_Escape
+        KeyboardKey::Left => 0xff51,           // XK_Left
+        KeyboardKey::Up => 0xff52,             // XK_Up
+        KeyboardKey::Right => 0xff53,          // XK_Right
+        KeyboardKey::Down => 0xff54,           // XK_Down
+        KeyboardKey::Delete => 0xffff,         // XK_Delete
+        KeyboardKey::Home => 0xff50,           // XK_Home
+        KeyboardKey::End => 0xff57,            // XK_End
+        KeyboardKey::Numpad0 => 0xffb0,        // XK_KP_0
+        KeyboardKey::Numpad1 => 0xffb1,        // XK_KP_1
+        KeyboardKey::Numpad2 => 0xffb2,        // XK_KP_2
+        KeyboardKey::Numpad3 => 0xffb3,        // XK_KP_3
+        KeyboardKey::Numpad4 => 0xffb4,        // XK_KP_4
+        KeyboardKey::Numpad5 => 0xffb5,        // XK_KP_5
+        KeyboardKey::Numpad6 => 0xffb6,        // XK_KP_6
+        KeyboardKey::Numpad7 => 0xffb7,        // XK_KP_7
+        KeyboardKey::Numpad8 => 0xffb8,        // XK_KP_8
+        KeyboardKey::Numpad9 => 0xffb9,        // XK_KP_9
+        KeyboardKey::NumpadDecimal => 0xffae,  // XK_KP_Decimal
+        KeyboardKey::NumpadComma => 0xffac,    // XK_KP_Separator
+        KeyboardKey::NumpadAdd => 0xffab,      // XK_KP_Add
+        KeyboardKey::NumpadSubtract => 0xffad, // XK_KP_Subtract
+        KeyboardKey::NumpadMultiply => 0xffaa, // XK_KP_Multiply
+        KeyboardKey::NumpadDivide => 0xffaf,   // XK_KP_Divide
+        KeyboardKey::NumpadEnter => 0xff8d,    // XK_KP_Enter
     }
 }
 
@@ -57,6 +74,23 @@ pub(crate) fn xdotool_key_name(key: KeyboardKey) -> &'static str {
         KeyboardKey::Delete => "Delete",
         KeyboardKey::Home => "Home",
         KeyboardKey::End => "End",
+        KeyboardKey::Numpad0 => "KP_0",
+        KeyboardKey::Numpad1 => "KP_1",
+        KeyboardKey::Numpad2 => "KP_2",
+        KeyboardKey::Numpad3 => "KP_3",
+        KeyboardKey::Numpad4 => "KP_4",
+        KeyboardKey::Numpad5 => "KP_5",
+        KeyboardKey::Numpad6 => "KP_6",
+        KeyboardKey::Numpad7 => "KP_7",
+        KeyboardKey::Numpad8 => "KP_8",
+        KeyboardKey::Numpad9 => "KP_9",
+        KeyboardKey::NumpadDecimal => "KP_Decimal",
+        KeyboardKey::NumpadComma => "KP_Separator",
+        KeyboardKey::NumpadAdd => "KP_Add",
+        KeyboardKey::NumpadSubtract => "KP_Subtract",
+        KeyboardKey::NumpadMultiply => "KP_Multiply",
+        KeyboardKey::NumpadDivide => "KP_Divide",
+        KeyboardKey::NumpadEnter => "KP_Enter",
     }
 }
 
@@ -341,6 +375,126 @@ impl InputBackend for LinuxInput {
         tracing::warn!("Linux type_unicode failed: {:?}", x11_res.err());
         Err(PlatformError::Unavailable("unavailable".into()))
     }
+
+    fn presentation_control(&self, command: PresentationCommand) -> Result<(), PlatformError> {
+        match command {
+            PresentationCommand::Start => press_keysym_chord(&[], 0xffbe, "F5"),
+            PresentationCommand::StartCurrent => press_keysym_chord(&[0xffe1], 0xffbe, "shift+F5"),
+            PresentationCommand::Stop => press_keysym_chord(&[], 0xff1b, "Escape"),
+            PresentationCommand::Next => press_keysym_chord(&[], 0xff56, "Next"),
+            PresentationCommand::Previous => press_keysym_chord(&[], 0xff55, "Prior"),
+            PresentationCommand::Blackout => press_keysym_chord(&[], 0x0062, "b"),
+            PresentationCommand::Whiteout => press_keysym_chord(&[], 0x0077, "w"),
+        }
+    }
+
+    fn deck_trigger(&self, action: DeckAction) -> Result<(), PlatformError> {
+        match action {
+            DeckAction::ShowDesktop => press_keysym_chord(&[0xffeb], 0x0064, "super+d"),
+            DeckAction::TaskView => press_keysym_chord(&[], 0xffeb, "Super_L"),
+            DeckAction::SwitchWindow => press_keysym_chord(&[0xffe9], 0xff09, "alt+Tab"),
+            DeckAction::CloseWindow => press_keysym_chord(&[0xffe9], 0xffbd, "alt+F4"),
+            DeckAction::Screenshot => {
+                if press_keysym_chord(&[], 0xff61, "Print").is_ok()
+                    || spawn_detached("gnome-screenshot", &["-i"])
+                    || spawn_detached("spectacle", &[])
+                {
+                    Ok(())
+                } else {
+                    Err(PlatformError::Unavailable("unavailable".into()))
+                }
+            }
+            DeckAction::Fullscreen => press_keysym_chord(&[], 0xffc8, "F11"),
+            DeckAction::LockPc => crate::platform::power().lock_screen(),
+            DeckAction::Calculator => {
+                if spawn_detached("gnome-calculator", &[])
+                    || spawn_detached("kcalc", &[])
+                    || spawn_detached("galculator", &[])
+                    || press_keysym_chord(&[], 0x1008_ff1d, "XF86Calculator").is_ok()
+                {
+                    Ok(())
+                } else {
+                    Err(PlatformError::Unavailable("unavailable".into()))
+                }
+            }
+            DeckAction::Downloads => {
+                let sys = crate::platform::system();
+                let base = sys
+                    .downloads_dir()
+                    .ok_or_else(|| PlatformError::Unavailable("unavailable".into()))?;
+                let folder = base.join(crate::files::FOLDER_NAME);
+                let target = if folder.exists() { folder } else { base };
+                sys.open_folder(&target)
+                    .map_err(|()| PlatformError::Unavailable("unavailable".into()))
+            }
+            DeckAction::Browser => {
+                if press_keysym_chord(&[], 0x1008_ff18, "XF86HomePage").is_ok() {
+                    Ok(())
+                } else {
+                    crate::platform::system()
+                        .open_url("https://www.google.com")
+                        .map_err(|()| PlatformError::Unavailable("unavailable".into()))
+                }
+            }
+            DeckAction::TaskManager => {
+                if spawn_detached("gnome-system-monitor", &[])
+                    || spawn_detached("plasma-systemmonitor", &[])
+                    || spawn_detached("ksysguard", &[])
+                    || press_keysym_chord(&[0xffe3], 0xff1b, "ctrl+Escape").is_ok()
+                {
+                    Ok(())
+                } else {
+                    Err(PlatformError::Unavailable("unavailable".into()))
+                }
+            }
+            DeckAction::EmojiPicker => press_keysym_chord(&[0xffe3], 0x002e, "ctrl+period"),
+        }
+    }
+}
+
+fn spawn_detached(program: &str, args: &[&str]) -> bool {
+    Command::new(program).args(args).spawn().is_ok()
+}
+
+fn press_keysym_chord(
+    modifiers: &[u32],
+    main_sym: u32,
+    xdotool_chord: &str,
+) -> Result<(), PlatformError> {
+    let x11_res = with_x11(|conn, _| {
+        let mut mod_kcs = Vec::with_capacity(modifiers.len());
+        for &mod_sym in modifiers {
+            let (kc, _) = resolve_keycode(conn, mod_sym)?;
+            mod_kcs.push(kc);
+        }
+        let (main_kc, scratch) = resolve_keycode(conn, main_sym)?;
+        for &kc in &mod_kcs {
+            let _ = conn.xtest_fake_input(KEY_PRESS_EVENT, kc, 0, x11rb::NONE, 0, 0, 0);
+        }
+        let press = conn.xtest_fake_input(KEY_PRESS_EVENT, main_kc, 0, x11rb::NONE, 0, 0, 0);
+        let release = conn.xtest_fake_input(KEY_RELEASE_EVENT, main_kc, 0, x11rb::NONE, 0, 0, 0);
+        for &kc in mod_kcs.iter().rev() {
+            let _ = conn.xtest_fake_input(KEY_RELEASE_EVENT, kc, 0, x11rb::NONE, 0, 0, 0);
+        }
+        let _ = conn.sync();
+        unbind_scratch(conn, scratch);
+        press.map_err(|e| e.to_string())?;
+        release.map_err(|e| e.to_string())?;
+        Ok(())
+    });
+    if x11_res.is_ok() {
+        return Ok(());
+    }
+
+    if run_cmd("xdotool", &["key", "--clearmodifiers", xdotool_chord]) {
+        return Ok(());
+    }
+
+    tracing::warn!(
+        "Linux press_keysym_chord({xdotool_chord}) failed: {:?}",
+        x11_res.err()
+    );
+    Err(PlatformError::Unavailable("unavailable".into()))
 }
 
 #[cfg(test)]
@@ -352,6 +506,10 @@ mod tests {
         assert_eq!(keysym_for(KeyboardKey::Enter), 0xff0d);
         assert_eq!(keysym_for(KeyboardKey::Backspace), 0xff08);
         assert_eq!(keysym_for(KeyboardKey::Escape), 0xff1b);
+        assert_eq!(keysym_for(KeyboardKey::Numpad0), 0xffb0);
+        assert_eq!(keysym_for(KeyboardKey::Numpad9), 0xffb9);
+        assert_eq!(keysym_for(KeyboardKey::NumpadEnter), 0xff8d);
+        assert_eq!(xdotool_key_name(KeyboardKey::NumpadComma), "KP_Separator");
         assert_eq!(char_to_keysym('a'), b'a' as u32);
         assert_eq!(char_to_keysym('á'), 0x00e1);
         assert_eq!(char_to_keysym('🦊'), 0x0100_0000 | ('🦊' as u32));

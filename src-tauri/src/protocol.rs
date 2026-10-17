@@ -27,6 +27,14 @@ pub struct Features {
     pub power: bool,
     /// clipboard.v2 on top of files.v2, its transport: images in the clipboard.
     pub clipboard_image: bool,
+    /// wol.v1: the PC shares its active MAC addresses in `welcome` so the phone can wake it.
+    pub wol: bool,
+    /// numpad.v1: dedicated numeric keypad keys (`numpad0`..`numpad9`, operators, `numpad_enter`).
+    pub numpad: bool,
+    /// presentation.v1: slide navigation, start/stop and screen blackout/whiteout.
+    pub presentation: bool,
+    /// deck.v1: curated cross-platform quick actions (window management, screenshot, system tools).
+    pub deck: bool,
 }
 
 impl Features {
@@ -50,6 +58,10 @@ impl Features {
                     "info.v1" => features.info = true,
                     "power.v1" => features.power = true,
                     "clipboard.v2" => clipboard_v2 = true,
+                    "wol.v1" => features.wol = true,
+                    "numpad.v1" => features.numpad = true,
+                    "presentation.v1" => features.presentation = true,
+                    "deck.v1" => features.deck = true,
                     _ => {}
                 }
             }
@@ -156,6 +168,12 @@ pub enum Action {
     KeyboardText { text: String },
     #[serde(rename = "keyboard.key")]
     KeyboardKey { key: KeyboardKey },
+    /// presentation.v1: slide navigation, start/stop and screen blackout/whiteout.
+    #[serde(rename = "presentation.control")]
+    PresentationControl { command: PresentationCommand },
+    /// deck.v1: curated quick actions (window management, screenshot, system tools).
+    #[serde(rename = "deck.trigger")]
+    DeckTrigger { id: DeckAction },
     #[serde(rename = "file.offer")]
     FileOffer {
         #[serde(rename = "transferId")]
@@ -328,7 +346,7 @@ pub enum PointerButton {
     Right,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum KeyboardKey {
     Enter,
@@ -342,6 +360,87 @@ pub enum KeyboardKey {
     Delete,
     Home,
     End,
+    Numpad0,
+    Numpad1,
+    Numpad2,
+    Numpad3,
+    Numpad4,
+    Numpad5,
+    Numpad6,
+    Numpad7,
+    Numpad8,
+    Numpad9,
+    #[serde(rename = "numpad_decimal")]
+    NumpadDecimal,
+    #[serde(rename = "numpad_comma")]
+    NumpadComma,
+    #[serde(rename = "numpad_add")]
+    NumpadAdd,
+    #[serde(rename = "numpad_subtract")]
+    NumpadSubtract,
+    #[serde(rename = "numpad_multiply")]
+    NumpadMultiply,
+    #[serde(rename = "numpad_divide")]
+    NumpadDivide,
+    #[serde(rename = "numpad_enter")]
+    NumpadEnter,
+}
+
+impl KeyboardKey {
+    /// True for keys added by `numpad.v1`.
+    pub fn is_numpad(self) -> bool {
+        matches!(
+            self,
+            Self::Numpad0
+                | Self::Numpad1
+                | Self::Numpad2
+                | Self::Numpad3
+                | Self::Numpad4
+                | Self::Numpad5
+                | Self::Numpad6
+                | Self::Numpad7
+                | Self::Numpad8
+                | Self::Numpad9
+                | Self::NumpadDecimal
+                | Self::NumpadComma
+                | Self::NumpadAdd
+                | Self::NumpadSubtract
+                | Self::NumpadMultiply
+                | Self::NumpadDivide
+                | Self::NumpadEnter
+        )
+    }
+}
+
+/// presentation.v1 commands mapped to standard presentation shortcuts on Windows and Linux.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PresentationCommand {
+    Start,
+    StartCurrent,
+    Stop,
+    Next,
+    Previous,
+    Blackout,
+    Whiteout,
+}
+
+/// deck.v1 curated cross-platform system and window actions.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DeckAction {
+    ShowDesktop,
+    TaskView,
+    SwitchWindow,
+    CloseWindow,
+    Screenshot,
+    Fullscreen,
+    LockPc,
+    Calculator,
+    Downloads,
+    Browser,
+    TaskManager,
+    EmojiPicker,
 }
 
 impl Action {
@@ -354,6 +453,8 @@ impl Action {
                 | Self::PointerScroll { .. }
                 | Self::KeyboardText { .. }
                 | Self::KeyboardKey { .. }
+                | Self::PresentationControl { .. }
+                | Self::DeckTrigger { .. }
         )
     }
     pub fn is_file(&self) -> bool {
@@ -400,7 +501,7 @@ pub fn validate_action(action: &Action) -> Result<(), &'static str> {
 }
 
 /// Same rules, with `file.offer` checked against what the connection negotiated:
-/// files.v2 for any file, clipboard.v2 for the `clipboard` field.
+/// files.v2 for any file, clipboard.v2 for the `clipboard` field, plus numpad/presentation/deck.
 pub fn validate_action_for(action: &Action, negotiated: &Features) -> Result<(), &'static str> {
     match action {
         Action::VolumeSet { percent } if *percent > 100 => Err("invalid_message"),
@@ -445,6 +546,11 @@ pub fn validate_action_for(action: &Action, negotiated: &Features) -> Result<(),
         {
             Err("invalid_message")
         }
+        Action::KeyboardKey { key } if key.is_numpad() && !negotiated.numpad => {
+            Err("unavailable")
+        }
+        Action::PresentationControl { .. } if !negotiated.presentation => Err("unavailable"),
+        Action::DeckTrigger { .. } if !negotiated.deck => Err("unavailable"),
         Action::FileOffer {
             clipboard: Some(clipboard),
             ..
@@ -798,6 +904,7 @@ mod tests {
                 info: true,
                 power: true,
                 clipboard_image: true,
+                ..Features::default()
             }
         );
         let without_clipboard = Features {
@@ -855,6 +962,35 @@ mod tests {
         let with_files = Features::parse([b"files.v2, clipboard.v2".as_slice()]);
         assert!(with_files.clipboard_image && with_files.files_v2);
         assert!(Features::parse([b"power.v1".as_slice()]).power);
+    }
+
+    #[test]
+    fn wol_numpad_presentation_and_deck_require_negotiation() {
+        let negotiated = Features::parse([
+            b"input.v1, wol.v1, numpad.v1, presentation.v1, deck.v1".as_slice()
+        ]);
+        assert!(
+            negotiated.input
+                && negotiated.wol
+                && negotiated.numpad
+                && negotiated.presentation
+                && negotiated.deck
+        );
+        let numpad = Action::KeyboardKey {
+            key: KeyboardKey::Numpad5,
+        };
+        let pres = Action::PresentationControl {
+            command: PresentationCommand::Next,
+        };
+        let deck = Action::DeckTrigger {
+            id: DeckAction::ShowDesktop,
+        };
+        assert_eq!(validate_action(&numpad), Err("unavailable"));
+        assert_eq!(validate_action(&pres), Err("unavailable"));
+        assert_eq!(validate_action(&deck), Err("unavailable"));
+        assert_eq!(validate_action_for(&numpad, &negotiated), Ok(()));
+        assert_eq!(validate_action_for(&pres, &negotiated), Ok(()));
+        assert_eq!(validate_action_for(&deck, &negotiated), Ok(()));
     }
 
     #[test]

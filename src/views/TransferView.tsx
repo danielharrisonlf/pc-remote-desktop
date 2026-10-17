@@ -117,7 +117,7 @@ export function InputControls({ status, settings, run, isBusy }: Pick<ViewProps,
       <div className="kill-switch">
         <div>
           <p className="kill-title">Mouse, teclado e energia bloqueados</p>
-          <p className="muted">O celular só volta a controlar o PC, inclusive desligar e suspender, depois de liberar.</p>
+          <p className="muted">Libere para retomar o controle pelo celular.</p>
         </div>
         <Button variant="primary" icon={LockKeyholeOpen} loading={isBusy('unblockInput')} onClick={() => void run('unblockInput', desktopApi.unblockInput, 'Controle pelo celular liberado.')}>
           Liberar
@@ -129,7 +129,7 @@ export function InputControls({ status, settings, run, isBusy }: Pick<ViewProps,
     <div className="kill-switch">
       <div>
         <p className="kill-title">{status.inputActive ? 'Interromper controle' : 'Bloquear controle pelo celular'}</p>
-        <p className="muted">Bloqueia mouse, teclado e energia (desligar, suspender) até você liberar e cancela o que estiver agendado. Também no ícone da bandeja.</p>
+        <p className="muted">Pausa mouse, teclado e ações de energia.</p>
       </div>
       <Button variant={status.inputActive ? 'danger' : 'secondary'} icon={Hand} loading={isBusy('stopInput')} onClick={() => void run('stopInput', desktopApi.stopInput, 'Mouse, teclado e energia bloqueados.')}>
         {status.inputActive ? 'Interromper' : 'Bloquear'}
@@ -148,7 +148,7 @@ function OutgoingArea({ status, run, isBusy }: { status: DesktopStatus; run: Run
       <div className="kill-switch">
         <div>
           <p className="kill-title">Enviar ao celular</p>
-          <p className="muted">{sendSummary(status)} Também dá para arrastar arquivos para esta janela.</p>
+          <p className="muted">{sendSummary(status)}</p>
         </div>
         <Button variant="primary" icon={Upload} loading={isBusy('sendFiles')} onClick={sendFiles}>
           Escolher arquivos
@@ -203,7 +203,6 @@ export function TransferView({ status, settings, changeSettings, run, isBusy }: 
             <p className="muted subsection-empty">Nenhum arquivo ainda.</p>
           )}
         </div>
-        <p className="card-footnote">Arquivos do celular vão para Downloads\PC Remote e ficam marcados como vindos da internet.</p>
       </section>
 
       <section className="card" aria-labelledby="clipboard-title">
@@ -236,7 +235,6 @@ export function TransferView({ status, settings, changeSettings, run, isBusy }: 
           ) : (
             <p className="muted subsection-empty">Nenhuma cópia ainda.</p>
           )}
-          <p className="card-footnote">O texto e as imagens copiados não são salvos. Senhas de gerenciadores não são enviadas.</p>
         </div>
       </section>
 
@@ -248,11 +246,6 @@ export function TransferView({ status, settings, changeSettings, run, isBusy }: 
           <span className={cx('badge', settings.inputBlocked ? 'badge-neutral' : status.inputActive ? 'badge-success' : 'badge-accent')}>{inputSummary(settings, status.inputActive)}</span>
         </header>
         <InputControls status={status} settings={settings} run={run} isBusy={isBusy} />
-        <ul className="notes">
-          <li>Cliques e texto vão para a janela em foco.</li>
-          <li>Apps abertos como administrador e a tela de bloqueio podem não responder.</li>
-          <li>Interromper também impede o celular de bloquear, suspender, desligar ou reiniciar o PC.</li>
-        </ul>
       </section>
     </div>
   );

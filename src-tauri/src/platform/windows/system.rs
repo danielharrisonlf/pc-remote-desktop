@@ -119,6 +119,72 @@ unsafe fn show_file_dialog(owner: isize) -> windows::core::Result<Vec<PathBuf>> 
     Ok(paths)
 }
 
+#[link(name = "iphlpapi")]
+extern "system" {
+    fn SendARP(dest_ip: u32, src_ip: u32, mac_addr: *mut u8, phy_addr_len: *mut u32) -> u32;
+}
+
+fn read_mac_addresses() -> Vec<String> {
+    let mut macs = Vec::new();
+    let mut ips = Vec::new();
+    if let Ok(std::net::IpAddr::V4(v4)) = local_ip_address::local_ip() {
+        if !v4.is_loopback() && !v4.is_link_local() && !v4.is_unspecified() {
+            ips.push(v4);
+        }
+    }
+    if let Ok(ifaces) = local_ip_address::list_afinet_netifas() {
+        for (_, ip) in ifaces {
+            if let std::net::IpAddr::V4(v4) = ip {
+                if !v4.is_loopback()
+                    && !v4.is_link_local()
+                    && !v4.is_unspecified()
+                    && !ips.contains(&v4)
+                {
+                    ips.push(v4);
+                }
+            }
+        }
+    }
+    for v4 in ips {
+        let mut buf = [0u8; 8];
+        let mut len = 6u32;
+        let dest = u32::from_ne_bytes(v4.octets());
+        let rc = unsafe { SendARP(dest, 0, buf.as_mut_ptr(), &mut len) };
+        if rc == 0 && len == 6 {
+            let raw = format!(
+                "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]
+            );
+            if let Some(norm) = crate::platform::normalize_mac(&raw) {
+                if !macs.contains(&norm) {
+                    macs.push(norm);
+                }
+            }
+        }
+    }
+    if macs.is_empty() {
+        use std::os::windows::process::CommandExt;
+        if let Ok(out) = std::process::Command::new("getmac")
+            .args(["/fo", "csv", "/nh"])
+            .creation_flags(0x0800_0000)
+            .output()
+        {
+            let text = String::from_utf8_lossy(&out.stdout);
+            for line in text.lines() {
+                if let Some(first) = line.split(',').next() {
+                    if let Some(norm) = crate::platform::normalize_mac(first) {
+                        if !macs.contains(&norm) {
+                            macs.push(norm);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    macs.truncate(8);
+    macs
+}
+
 impl SystemBackend for WindowsSystem {
     fn os_name(&self) -> &'static str {
         static NAME: OnceLock<String> = OnceLock::new();
@@ -127,6 +193,11 @@ impl SystemBackend for WindowsSystem {
 
     fn hostname(&self) -> String {
         std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC".into())
+    }
+
+    fn mac_addresses(&self) -> Vec<String> {
+        static MACS: OnceLock<Vec<String>> = OnceLock::new();
+        MACS.get_or_init(read_mac_addresses).clone()
     }
 
     fn monotonic_ms(&self) -> u64 {

@@ -14,7 +14,8 @@ use crate::{
     energy::PowerSystem,
     files::SafeName,
     protocol::{
-        Action, AudioState, KeyboardKey, MediaCommand, MediaState, PointerButton, PowerAction,
+        Action, AudioState, DeckAction, KeyboardKey, MediaCommand, MediaState, PointerButton,
+        PowerAction, PresentationCommand,
     },
     wic::ClipImage,
 };
@@ -97,6 +98,8 @@ pub trait InputBackend: Send + Sync {
         self.key_up(key)
     }
     fn type_unicode(&self, text: &str) -> Result<(), PlatformError>;
+    fn presentation_control(&self, command: PresentationCommand) -> Result<(), PlatformError>;
+    fn deck_trigger(&self, action: DeckAction) -> Result<(), PlatformError>;
 
     /// Executes a high-level protocol input action.
     fn execute(&self, action: &Action) -> Result<(), PlatformError> {
@@ -106,6 +109,8 @@ pub trait InputBackend: Send + Sync {
             Action::PointerScroll { steps } => self.scroll_pointer(*steps),
             Action::KeyboardText { text } => self.type_unicode(text),
             Action::KeyboardKey { key } => self.press_key(*key),
+            Action::PresentationControl { command } => self.presentation_control(*command),
+            Action::DeckTrigger { id } => self.deck_trigger(*id),
             _ => Err(PlatformError::InvalidMessage),
         }
     }
@@ -194,6 +199,8 @@ pub trait AutostartBackend: Send + Sync {
 pub trait SystemBackend: Send + Sync {
     fn os_name(&self) -> &'static str;
     fn hostname(&self) -> String;
+    /// Active non-loopback network adapter MAC addresses (`"aa:bb:cc:dd:ee:ff"`) for Wake-on-LAN (`wol.v1`).
+    fn mac_addresses(&self) -> Vec<String>;
     fn monotonic_ms(&self) -> u64;
     fn local_hms(&self) -> (u16, u16, u16);
     fn config_dir(&self) -> Result<PathBuf, String>;
@@ -366,4 +373,51 @@ pub fn check_write_sequence(expected: Option<u32>, actual: u32) -> Result<(), Pl
         return Err(PlatformError::Conflict);
     }
     Ok(())
+}
+
+/// Shared helper: normalizes a 6-byte hardware MAC address (`"AA-BB-CC-DD-EE-FF"` or `"aa:bb:cc:dd:ee:ff"`)
+/// into lowercase colon-separated `"aa:bb:cc:dd:ee:ff"`, rejecting all-zero, broadcast, and multicast MACs.
+pub fn normalize_mac(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_matches('"');
+    let parts: Vec<&str> = trimmed.split([':', '-']).collect();
+    if parts.len() != 6 {
+        return None;
+    }
+    let mut bytes = [0u8; 6];
+    for (i, part) in parts.iter().enumerate() {
+        if part.len() != 2 {
+            return None;
+        }
+        bytes[i] = u8::from_str_radix(part, 16).ok()?;
+    }
+    // Reject all-zero, broadcast, and multicast (LSB of first octet = 1) addresses.
+    if bytes == [0; 6] || bytes == [0xff; 6] || (bytes[0] & 1) != 0 {
+        return None;
+    }
+    Some(format!(
+        "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_mac;
+
+    #[test]
+    fn normalizes_unicast_mac_and_rejects_invalid_or_multicast() {
+        assert_eq!(
+            normalize_mac("A4-B1-C2-D3-E4-F5").as_deref(),
+            Some("a4:b1:c2:d3:e4:f5")
+        );
+        assert_eq!(
+            normalize_mac("00:1a:2b:3c:4d:5e\n").as_deref(),
+            Some("00:1a:2b:3c:4d:5e")
+        );
+        assert_eq!(normalize_mac("00:00:00:00:00:00"), None);
+        assert_eq!(normalize_mac("ff:ff:ff:ff:ff:ff"), None);
+        // Multicast bit set (0x01)
+        assert_eq!(normalize_mac("01:00:5e:00:00:01"), None);
+        assert_eq!(normalize_mac("invalid"), None);
+    }
 }

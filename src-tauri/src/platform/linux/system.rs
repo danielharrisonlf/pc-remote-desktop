@@ -143,6 +143,56 @@ fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
     Err(err)
 }
 
+fn is_virtual_interface(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower == "lo"
+        || lower.starts_with("docker")
+        || lower.starts_with("veth")
+        || lower.starts_with("br-")
+        || lower.starts_with("virbr")
+        || lower.starts_with("tun")
+        || lower.starts_with("tap")
+        || lower.starts_with("wg")
+        || lower.starts_with("tailscale")
+        || lower.starts_with("zt")
+}
+
+fn read_mac_addresses_from(sys_net: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(sys_net) else {
+        return Vec::new();
+    };
+    let mut ifaces: Vec<(u8, String, String)> = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if is_virtual_interface(&name) {
+            continue;
+        }
+        let addr_path = entry.path().join("address");
+        let Ok(raw) = fs::read_to_string(addr_path) else {
+            continue;
+        };
+        if let Some(mac) = crate::platform::normalize_mac(&raw) {
+            let priority = if name.starts_with("en") || name.starts_with("eth") {
+                0
+            } else if name.starts_with("wl") {
+                1
+            } else {
+                2
+            };
+            ifaces.push((priority, name, mac));
+        }
+    }
+    ifaces.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    let mut macs = Vec::new();
+    for (_, _, mac) in ifaces {
+        if !macs.contains(&mac) {
+            macs.push(mac);
+        }
+    }
+    macs.truncate(8);
+    macs
+}
+
 impl SystemBackend for LinuxSystem {
     fn os_name(&self) -> &'static str {
         static NAME: OnceLock<String> = OnceLock::new();
@@ -157,6 +207,10 @@ impl SystemBackend for LinuxSystem {
             }
         }
         std::env::var("HOSTNAME").unwrap_or_else(|_| "PC".into())
+    }
+
+    fn mac_addresses(&self) -> Vec<String> {
+        read_mac_addresses_from(Path::new("/sys/class/net"))
     }
 
     fn monotonic_ms(&self) -> u64 {

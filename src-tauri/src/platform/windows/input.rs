@@ -1,14 +1,17 @@
 //! Windows Win32 `SendInput` implementation of `InputBackend`.
 use crate::{
     platform::{InputBackend, PlatformError},
-    protocol::{Action, KeyboardKey, PointerButton},
+    protocol::{Action, DeckAction, KeyboardKey, PointerButton, PresentationCommand},
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
     KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE,
     MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEINPUT, VIRTUAL_KEY,
-    VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_RETURN, VK_RIGHT, VK_TAB,
-    VK_UP,
+    VK_ADD, VK_BACK, VK_BROWSER_HOME, VK_CONTROL, VK_DECIMAL, VK_DELETE, VK_DIVIDE, VK_DOWN,
+    VK_END, VK_ESCAPE, VK_F11, VK_F4, VK_F5, VK_HOME, VK_LAUNCH_APP2, VK_LEFT, VK_LWIN, VK_MENU,
+    VK_MULTIPLY, VK_NEXT, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3, VK_NUMPAD4, VK_NUMPAD5,
+    VK_NUMPAD6, VK_NUMPAD7, VK_NUMPAD8, VK_NUMPAD9, VK_OEM_PERIOD, VK_PRIOR, VK_RETURN, VK_RIGHT,
+    VK_SEPARATOR, VK_SHIFT, VK_SUBTRACT, VK_TAB, VK_UP,
 };
 
 pub struct WindowsInput;
@@ -64,6 +67,92 @@ fn vk_for(named: KeyboardKey) -> (VIRTUAL_KEY, bool) {
         KeyboardKey::Delete => (VK_DELETE, true),
         KeyboardKey::Home => (VK_HOME, true),
         KeyboardKey::End => (VK_END, true),
+        KeyboardKey::Numpad0 => (VK_NUMPAD0, false),
+        KeyboardKey::Numpad1 => (VK_NUMPAD1, false),
+        KeyboardKey::Numpad2 => (VK_NUMPAD2, false),
+        KeyboardKey::Numpad3 => (VK_NUMPAD3, false),
+        KeyboardKey::Numpad4 => (VK_NUMPAD4, false),
+        KeyboardKey::Numpad5 => (VK_NUMPAD5, false),
+        KeyboardKey::Numpad6 => (VK_NUMPAD6, false),
+        KeyboardKey::Numpad7 => (VK_NUMPAD7, false),
+        KeyboardKey::Numpad8 => (VK_NUMPAD8, false),
+        KeyboardKey::Numpad9 => (VK_NUMPAD9, false),
+        KeyboardKey::NumpadDecimal => (VK_DECIMAL, false),
+        KeyboardKey::NumpadComma => (VK_SEPARATOR, false),
+        KeyboardKey::NumpadAdd => (VK_ADD, false),
+        KeyboardKey::NumpadSubtract => (VK_SUBTRACT, false),
+        KeyboardKey::NumpadMultiply => (VK_MULTIPLY, false),
+        KeyboardKey::NumpadDivide => (VK_DIVIDE, true),
+        KeyboardKey::NumpadEnter => (VK_RETURN, true),
+    }
+}
+
+fn tap(vk: VIRTUAL_KEY, extended: bool) -> Vec<INPUT> {
+    let flags = if extended {
+        KEYEVENTF_EXTENDEDKEY
+    } else {
+        Default::default()
+    };
+    vec![key(vk, 0, flags), key(vk, 0, flags | KEYEVENTF_KEYUP)]
+}
+
+fn chord(modifiers: &[(VIRTUAL_KEY, bool)], main_vk: VIRTUAL_KEY, main_ext: bool) -> Vec<INPUT> {
+    let mut v = Vec::with_capacity((modifiers.len() + 1) * 2);
+    for &(vk, ext) in modifiers {
+        let flags = if ext {
+            KEYEVENTF_EXTENDEDKEY
+        } else {
+            Default::default()
+        };
+        v.push(key(vk, 0, flags));
+    }
+    let main_flags = if main_ext {
+        KEYEVENTF_EXTENDEDKEY
+    } else {
+        Default::default()
+    };
+    v.push(key(main_vk, 0, main_flags));
+    v.push(key(main_vk, 0, main_flags | KEYEVENTF_KEYUP));
+    for &(vk, ext) in modifiers.iter().rev() {
+        let flags = if ext {
+            KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP
+        } else {
+            KEYEVENTF_KEYUP
+        };
+        v.push(key(vk, 0, flags));
+    }
+    v
+}
+
+pub(crate) fn presentation_events(command: PresentationCommand) -> Vec<INPUT> {
+    match command {
+        PresentationCommand::Start => tap(VK_F5, false),
+        PresentationCommand::StartCurrent => chord(&[(VK_SHIFT, false)], VK_F5, false),
+        PresentationCommand::Stop => tap(VK_ESCAPE, false),
+        PresentationCommand::Next => tap(VK_NEXT, true),
+        PresentationCommand::Previous => tap(VK_PRIOR, true),
+        PresentationCommand::Blackout => tap(VIRTUAL_KEY(0x42), false), // 'B'
+        PresentationCommand::Whiteout => tap(VIRTUAL_KEY(0x57), false), // 'W'
+    }
+}
+
+pub(crate) fn deck_events(action: DeckAction) -> Vec<INPUT> {
+    match action {
+        DeckAction::ShowDesktop => chord(&[(VK_LWIN, true)], VIRTUAL_KEY(0x44), false), // Win+D
+        DeckAction::TaskView => chord(&[(VK_LWIN, true)], VK_TAB, false),               // Win+Tab
+        DeckAction::SwitchWindow => chord(&[(VK_MENU, false)], VK_TAB, false),          // Alt+Tab
+        DeckAction::CloseWindow => chord(&[(VK_MENU, false)], VK_F4, false),            // Alt+F4
+        DeckAction::Screenshot => {
+            chord(&[(VK_LWIN, true), (VK_SHIFT, false)], VIRTUAL_KEY(0x53), false) // Win+Shift+S
+        }
+        DeckAction::Fullscreen => tap(VK_F11, false),
+        DeckAction::Calculator => tap(VK_LAUNCH_APP2, true),
+        DeckAction::Browser => tap(VK_BROWSER_HOME, true),
+        DeckAction::TaskManager => {
+            chord(&[(VK_CONTROL, false), (VK_SHIFT, false)], VK_ESCAPE, false)
+        }
+        DeckAction::EmojiPicker => chord(&[(VK_LWIN, true)], VK_OEM_PERIOD, false),
+        DeckAction::LockPc | DeckAction::Downloads => Vec::new(),
     }
 }
 
@@ -104,13 +193,10 @@ pub(crate) fn events(action: &Action) -> Vec<INPUT> {
         }
         Action::KeyboardKey { key: named } => {
             let (vk, extended) = vk_for(*named);
-            let flags = if extended {
-                KEYEVENTF_EXTENDEDKEY
-            } else {
-                Default::default()
-            };
-            vec![key(vk, 0, flags), key(vk, 0, flags | KEYEVENTF_KEYUP)]
+            tap(vk, extended)
         }
+        Action::PresentationControl { command } => presentation_events(*command),
+        Action::DeckTrigger { id } => deck_events(*id),
         _ => Vec::new(),
     }
 }
@@ -128,6 +214,10 @@ fn send_batch(v: &[INPUT], action: Option<&Action>) -> Result<(), PlatformError>
         let mut releases = vec![
             mouse(0, 0, 0, MOUSEEVENTF_LEFTUP),
             mouse(0, 0, 0, MOUSEEVENTF_RIGHTUP),
+            key(VK_SHIFT, 0, KEYEVENTF_KEYUP),
+            key(VK_CONTROL, 0, KEYEVENTF_KEYUP),
+            key(VK_MENU, 0, KEYEVENTF_KEYUP),
+            key(VK_LWIN, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP),
         ];
         if let Some(Action::KeyboardKey { key: named }) = action {
             let pair = events(&Action::KeyboardKey { key: *named });
@@ -147,6 +237,17 @@ fn send_batch(v: &[INPUT], action: Option<&Action>) -> Result<(), PlatformError>
         return Err(PlatformError::Unavailable("unavailable".into()));
     }
     Ok(())
+}
+
+fn open_downloads_folder() -> Result<(), PlatformError> {
+    let base = crate::platform::system()
+        .downloads_dir()
+        .ok_or_else(|| PlatformError::Unavailable("unavailable".into()))?;
+    let folder = base.join(crate::files::FOLDER_NAME);
+    let _ = std::fs::create_dir_all(&folder);
+    crate::platform::system()
+        .open_folder(&folder)
+        .map_err(|()| PlatformError::Unavailable("unavailable".into()))
 }
 
 impl InputBackend for WindowsInput {
@@ -202,9 +303,33 @@ impl InputBackend for WindowsInput {
         send_batch(&v, Some(&action))
     }
 
+    fn presentation_control(&self, command: PresentationCommand) -> Result<(), PlatformError> {
+        let action = Action::PresentationControl { command };
+        let v = events(&action);
+        send_batch(&v, Some(&action))
+    }
+
+    fn deck_trigger(&self, action: DeckAction) -> Result<(), PlatformError> {
+        match action {
+            DeckAction::LockPc => crate::platform::power().lock_screen(),
+            DeckAction::Downloads => open_downloads_folder(),
+            other => {
+                let act = Action::DeckTrigger { id: other };
+                let v = events(&act);
+                send_batch(&v, Some(&act))
+            }
+        }
+    }
+
     fn execute(&self, action: &Action) -> Result<(), PlatformError> {
-        let v = events(action);
-        send_batch(&v, Some(action))
+        match action {
+            Action::DeckTrigger { id } => self.deck_trigger(*id),
+            Action::PresentationControl { command } => self.presentation_control(*command),
+            _ => {
+                let v = events(action);
+                send_batch(&v, Some(action))
+            }
+        }
     }
 }
 
@@ -244,6 +369,32 @@ mod tests {
         unsafe {
             assert_eq!(v[0].Anonymous.mi.mouseData as i32, -120);
         }
+    }
+
+    #[test]
+    fn numpad_presentation_and_deck_chords_balance_down_and_up() {
+        let num = events(&Action::KeyboardKey {
+            key: KeyboardKey::NumpadEnter,
+        });
+        assert_eq!(num.len(), 2);
+        unsafe {
+            assert_eq!(num[0].Anonymous.ki.wVk, VK_RETURN);
+            assert_eq!(num[0].Anonymous.ki.dwFlags, KEYEVENTF_EXTENDEDKEY);
+            assert_eq!(
+                num[1].Anonymous.ki.dwFlags,
+                KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP
+            );
+        }
+
+        let start_current = events(&Action::PresentationControl {
+            command: PresentationCommand::StartCurrent,
+        });
+        assert_eq!(start_current.len(), 4);
+
+        let snap = events(&Action::DeckTrigger {
+            id: DeckAction::Screenshot,
+        });
+        assert_eq!(snap.len(), 6);
     }
 
     #[test]
