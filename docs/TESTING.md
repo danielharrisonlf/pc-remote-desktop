@@ -2,6 +2,41 @@
 
 O código contém integrações nativas reais. Testes unitários não comprovam compatibilidade de cada player, permissões do Android nem continuidade durante suspensão. Este registro distingue execução automatizada, execução no Windows deste ambiente e validações pendentes em Android físico.
 
+## Atualização 0.6.1 — energia do PC e imagens na área de transferência, 16/10/2026
+
+### Testes automatizados
+
+- `cargo fmt --check`, `cargo test --target x86_64-pc-windows-msvc`: **100 testes da biblioteca e 5 do atualizador passaram** (6 e 1 nativos ignorados). Os dois testes com a área de transferência real, `windows_unicode_clipboard_smoke` e `windows_image_clipboard_smoke`, foram rodados à mão e passaram; agora também conferem que a escrita devolve o número de sequência lido depois de fechar a área de transferência. `npx tsc --noEmit` sem erros e **38 testes Vitest**.
+- Novos: energia (`energy.rs`: estado `power` só para quem negociou; agendar, substituir e cancelar com os segundos restantes; ação imediata descartando o agendamento; execução no prazo; Interromper bloqueando e cancelando; revogação cancelando o agendamento do próprio celular; limite de 3 em 10 s; suspensão indisponível; falha virando diagnóstico e notificação; desligar e reiniciar nunca forçados), imagens (`wic.rs`: PNG do celular mantido e convertido em DIBV5 de baixo para cima, JPEG convertido em PNG, DIBs com paleta e máscaras, limites e dados inválidos; `clip_images.rs`: push com o campo `clipboard` na frente da fila e substituído pelo seguinte, cópia nova descartando o push anunciado ou em envio, consentimento, `eventId` repetido e revisão base das ofertas, imagem recebida gravada uma vez e sem eco) e os exemplos `negotiated061` do contrato. O executor de energia e o gravador de imagem são injetados: os testes nunca agem no Windows.
+- Integração com TLS real: `power.run` negociado, com `ack` antes do snapshot e bloqueado por Interromper; push de imagem chegando ao celular com o campo `clipboard`; imagem do celular indo para a área de transferência, sem passar por Downloads.
+- Build assinada 0.6.1: o `release:updater` conferiu a assinatura com a `pubkey` e a versão assinada, e o verificador do próprio plugin (`--test updater -- --ignored`) aceitou os artefatos reais (instalador de 4.373.889 bytes, versão 0.6.1). O executável release assinado também foi usado com o APK release do Android 16: energia, imagem do PC para o celular e controles de mídia.
+
+### Ponta a ponta: PC real + emuladores Android 13 e 16
+
+Windows 11 Pro (build 26300) com o executável release desta branch (`tauri build --no-bundle`), o AVD PCRemote_API33 (Android 13) e o PCRemote_Validation (Android 16, API 36), ambos com o APK debug da branch. Pareamento por convite entregue pelo adb ao `DebugInviteReceiver` (só na build debug), com código e aprovação no PC. A ponte de clipboard do emulador ficou desligada durante o teste. Para ter dois PCs com um computador só, a segunda instância rodou com `APPDATA` próprio (identidade e certificado novos) e `COMPUTERNAME=PC-TESTE-B`, uma de cada vez na porta 43127. Evidências em `artifacts/qa/0.6.1-e2e/` (fora dos repositórios).
+
+| Cenário | Resultado |
+|---|---|
+| Atualizar o celular 0.5.0 → 0.6.0 → 0.6.1 (Android 13) | Pareamento migrado para a lista `computers`; `credential` e `pcOs` removidas depois de gravar; reconectou sozinho com "Windows 11 Pro" |
+| Celular 0.6.0 com PC 0.6.1 | Conectou com touchpad armado: o PC não mandou campos novos a quem não negociou |
+| Agendar energia | "Desligar · Em 15 min": celular "Desliga às 22:24 (em 15 min)" (fuso UTC do emulador); painel "Desligar às 19:24 · pedido por Google sdk_gphone64_x86_64" com Cancelar; notificação do Windows |
+| Cancelar | Pelo celular e pelo botão do painel; some nos dois lados |
+| Interromper com agendamento | Agendamento descartado; celular com os quatro botões desabilitados e "Bloqueado no PC. Libere no PC Remote do Windows."; PC "Mouse, teclado e energia bloqueados"; Liberar reabilitou |
+| Bloquear agora (Android 16) | O Windows bloqueou (LogonUI) e o celular continuou conectado |
+| Imagem PC → celular, formato PNG | 1920×1080, 289.192 bytes, SHA-256 igual ao original; "Imagem do PC copiada no celular." com miniatura; o Gboard ofereceu a imagem e colou como anexo no Google Mensagens (nada enviado) |
+| Imagem PC → celular, só bitmap | Convertida em PNG 800×600; 9.890 pixels amostrados iguais ao original, opaca; o cache guardou só a última |
+| Sincronização desligada no celular | Push automático não chegou; "Buscar do PC" copiou a imagem (chip Manual) |
+| Texto e imagem juntos no PC | Chegou o texto; a imagem foi ignorada |
+| Imagem celular → PC ("Copy image" no Chrome, voltar ao app) | Android 13 e 16: PNG com SHA-256 igual ao do arquivo original (5.969 e 13.504 bytes); o Windows ficou com `PNG`, `CF_DIBV5` e bitmap. Funcionou também depois de 90 s com o processo congelado pelo Android 16 (`isFrozen=true`). "Enviar o que copiei" enviou a imagem. A primeira de cinco tentativas automáticas, logo depois das telas iniciais do Chrome, não enviou e não se repetiu |
+| Eco | **Achado e corrigido:** o PC devolvia ao celular o que acabara de receber dele, texto também (já acontecia na 0.6.0). `CloseClipboard` acrescenta os formatos sintetizados e avança o número de sequência, e o PC guardava o número lido antes de fechar. Agora a escrita devolve o número depois de fechar; o histórico mostra só "Recebido do celular" |
+| Vários PCs | O celular recusou a instância B no endereço do PC A (identidade fixada não confere). Convite + aprovação: PC-TESTE-B virou o atual e DESKTOP-HT6RNN3 foi para "Outros PCs". Seletor "Trocar de PC" na barra; trocar reconectou ao A; remover o B com confirmação tirou o cartão e o seletor |
+| Mídia fora do app (Android 13) | Serviço `mediaPlayback` ao abrir o app com o PC tocando; controles na área de notificações e na tela de bloqueio ("PC Remote teste de midia · Reprodutor Multimídia"); Pausar e Tocar mudaram o Reprodutor Multimídia; continuou funcionando com Doze forçado por 40 s; "Fechar" encerrou o serviço |
+| Mídia fora do app (Android 16) | Serviço `mediaPlayback` com notificação não dispensável; Pausar e Fechar |
+| Bloco "Mídia do PC" | Android 13 e 16: conectado, alterna na hora; com o processo encerrado, sobe o serviço, conecta e alterna |
+| Widget "Mídia do PC" | Android 13 e 16: com o processo encerrado, o toque sobe o serviço, conecta e alterna |
+
+Não testado de ponta a ponta: suspender, desligar e reiniciar de verdade (encerrariam a sessão de teste; cobertos por testes com executor de registro), aviso de 60 s antes do prazo, limite de 3 pedidos em 10 s, limite de 8 PCs e "Remover este PC" passando ao próximo (testes JVM), conversão de WebP/GIF/HEIC no celular e imagens acima de 32 MB, celular físico e Wi-Fi real, Android 7 a 12. O seletor de saída dos controles de mídia do Android mostra "This phone": é o padrão do sistema para uma sessão local, e o app não assume as teclas de volume do celular.
+
 ## Atualização 0.6.0 — menos chaves, arquivos de até 1 GB nos dois sentidos, mídia e pesquisa, 16/10/2026
 
 ### Testes automatizados
