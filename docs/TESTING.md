@@ -2,6 +2,16 @@
 
 O código contém integrações nativas reais. Testes unitários não comprovam compatibilidade de cada player, permissões do Android nem continuidade durante suspensão. Este registro distingue execução automatizada, execução no Windows deste ambiente e validações pendentes em Android físico.
 
+## Atualização 0.6.2 — arquitetura multiplataforma (Windows + Linux/Ubuntu), 17/10/2026
+
+### Testes automatizados
+
+- `cargo fmt --check`, `cargo test --target x86_64-pc-windows-msvc`: **102 testes da biblioteca e 5 do atualizador passaram** (6 e 1 nativos ignorados), com zero warnings de compilação. `npx tsc --noEmit` sem erros e **38 testes Vitest**.
+- **Camada Portas e Adaptadores (`src/platform/`)**: zero `#[cfg(windows)]` ou `#[cfg(target_os = "linux")]` nos módulos de domínio; traits `InputBackend`, `AudioBackend`, `MediaBackend`, `PowerBackend`, `ClipboardBackend`, `AutostartBackend` e `SystemBackend` com implementações isoladas em `src/platform/windows/` e `src/platform/linux/`.
+- **Imagens em Rust puro (`wic.rs`)**: substituição de `Win32_Graphics_Imaging` (WIC/COM) pela crate `image` (`png`, `jpeg`, `bmp`), mantendo a conversão de PNG/JPEG/DIB/DIBV5 de baixo para cima e cima para baixo, máscaras de cor e paleta de 8 bits.
+- **Compilação e testes no Linux (Ubuntu 22.04 LTS em container Docker)**: `cargo test --manifest-path src-tauri/Cargo.toml --lib` compilou e executou **106 testes unitários** em `x86_64-unknown-linux-gnu` com zero falhas e zero warnings, validando X11 XTEST (`x11rb`) + fallback Wayland, MPRIS2 D-Bus (`zbus`), `systemd-logind` (`org.freedesktop.login1.Manager` + `Inhibit`), PulseAudio/PipeWire/ALSA, `arboard`, autostart XDG (`~/.config/autostart/pc-remote-desktop.desktop`) e `renameat2(RENAME_NOREPLACE)` com verificação case-insensitive.
+- **Build assinada 0.6.2**: o `release:updater` conferiu a assinatura com a `pubkey` e a versão assinada (`version:0.6.2`), e o verificador do próprio plugin (`--test updater -- --ignored`) aceitou os artefatos reais (instalador de **4.549.481 bytes**, versão 0.6.2) e recusou cópias adulteradas.
+
 ## Atualização 0.6.1 — energia do PC e imagens na área de transferência, 16/10/2026
 
 ### Testes automatizados

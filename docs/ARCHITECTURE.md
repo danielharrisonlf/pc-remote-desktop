@@ -81,3 +81,16 @@ Windows: `App.tsx` só compõe o shell. `hooks/` concentra estado (`useStatus` c
 - `clip_images.rs`: clipboard.v2 nos dois sentidos. Uma cópia no Windows sem texto e com imagem vira um push com o campo `clipboard`, que passa na frente da fila de arquivos do `outbox.rs` e é substituído pela cópia seguinte; a oferta do celular com `clipboard` usa o mesmo slot e socket de `files.rs`, mas o arquivo vai para `%TEMP%\PC Remote` e, em `file.end`, para a área de transferência pelo gravador injetado no `Core` (`clipboard::write_image_checked` no app).
 - `clipboard.rs`: lê imagens (`PNG`, depois `CF_DIB` e `CF_DIBV5`) e grava `CF_DIBV5` + `PNG` sob a mesma checagem de sequência do texto. As duas escritas devolvem o número de sequência lido depois de `CloseClipboard`, que acrescenta os formatos sintetizados; é esse número que o listener informa e que impede o eco.
 - Painel: cartão Energia na Visão geral ("Desligar às 23:40 · pedido por …" com Cancelar, comando `cancel_power`), item "Cancelar ação agendada" na bandeja (habilitado só com agendamento), Interromper/Liberar dizendo que também bloqueiam a energia e histórico da Transferência com entradas "Imagem · 2,3 MB".
+
+## Arquitetura Multiplataforma — Windows e Linux / Ubuntu (0.6.2)
+
+- `platform/mod.rs`: camada de Portas e Adaptadores (`InputBackend`, `AudioBackend`, `MediaBackend`, `PowerBackend`, `ClipboardBackend`, `AutostartBackend`, `SystemBackend` e `PlatformError`). Os módulos de regra de negócio não importam crates específicas de sistema operacional nem espalham `#[cfg]`; interagem apenas com as traits expostas pelas fábricas em tempo de compilação.
+- `platform/windows/`: implementações Win32 e WinRT (`SendInput`, Core Audio `IAudioEndpointVolume`, GSMTC `GlobalSystemMediaTransportControlsSessionManager`, `LockWorkStation`/`SetSuspendState`/`InitiateShutdownW`/`PowerCreateRequest`, área de transferência Win32 com `CF_UNICODETEXT`/`CF_DIBV5`/`PNG`, registro `HKCU\...\Run`, DPAPI e `IFileOpenDialog`).
+- `platform/linux/`: implementações para Ubuntu 22.04 / 24.04 LTS e distribuições baseadas em Debian/XDG:
+  - `input.rs`: simulação X11 via `x11rb` (extensão XTEST e mapeamento dinâmico de keysyms Unicode) com fallback gracioso para `xdotool`/`ydotool`/`wtype` em sessões Wayland.
+  - `audio.rs`: controle linear de volume (0–100%) e mudo para PulseAudio e PipeWire (`pactl`/`wpctl`) com fallback ALSA (`amixer`).
+  - `media.rs`: integração com players de mídia via **MPRIS2 D-Bus** (`org.mpris.MediaPlayer2.*` sobre `zbus`).
+  - `power.rs`: gerenciamento de sessão e energia via **`systemd-logind` D-Bus** (`org.freedesktop.login1.Manager`: `LockSession`/`LockSessions`, `Suspend`, `Hibernate`, `PowerOff`, `Reboot`, `CanSuspend` e inibidor `Inhibit` durante transferências de arquivos).
+  - `clipboard.rs` e `wic.rs`: área de transferência multiplataforma (`arboard`) e conversão de imagens (`PNG`, `JPEG`, `BMP`/`DIBV5`) em Rust puro com a crate `image`.
+  - `autostart.rs` e `system.rs`: entrada XDG em `~/.config/autostart/pc-remote-desktop.desktop`, leitura de `/etc/os-release`, `statvfs`, permissões `0600` para segredos locais, `xdg-open` e seletor nativo (`zenity`/`kdialog`).
+

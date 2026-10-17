@@ -1,17 +1,17 @@
 # PC Remote Desktop
 
-Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositório Windows independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.6.1, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md), [validação](docs/TESTING.md) e [como publicar uma versão](docs/RELEASE.md).
+Controle local do Windows e Linux (Ubuntu) pelo Android, sem conta ou nuvem. Este é o repositório desktop independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.6.2, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md), [validação](docs/TESTING.md) e [como publicar uma versão](docs/RELEASE.md).
 
-## Baixar e instalar — Windows 0.6.1
+## Baixar e instalar — Windows 0.6.2
 
 | Aplicativo | Download |
 |---|---|
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.1/pc-remote-desktop-0.6.1-x64-setup.exe) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.2/pc-remote-desktop-0.6.2-x64-setup.exe) |
 | Android — APK universal | [Baixar APK 0.6.1](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.1-kotlin/pc-remote-android-kotlin-0.6.1-evaluation.apk) |
 
-As Releases dos dois repositórios são públicas. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.1) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.1-kotlin) também incluem os hashes SHA-256.
+As Releases dos dois repositórios são públicas. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.2) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.1-kotlin) também incluem os hashes SHA-256.
 
-Instale o `.exe` no Windows e abra o PC Remote pela bandeja. **Quem usa a 0.5.0 ou a 0.6.0 recebe a 0.6.1 pelo próprio app** (veja [Atualizações](#atualizações)); quem usa a 0.4.0 ou anterior instala manualmente uma vez, por cima da instalação atual (mantenha a opção padrão da página do instalador e não marque a exclusão dos dados). Pareamentos e configurações são mantidos. No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
+Instale o `.exe` no Windows e abra o PC Remote pela bandeja. **Quem usa a 0.5.0, 0.6.0 ou 0.6.1 recebe a 0.6.2 pelo próprio app** (veja [Atualizações](#atualizações)); quem usa a 0.4.0 ou anterior instala manualmente uma vez, por cima da instalação atual (mantenha a opção padrão da página do instalador e não marque a exclusão dos dados). Pareamentos e configurações são mantidos. No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
 
 Esta é uma versão de avaliação: APK assinado com chave debug e instalador sem Authenticode. A validação em celular físico e players reais permanece pendente; consulte [testes e limitações](docs/TESTING.md).
 
@@ -40,6 +40,33 @@ npm run tauri build -- --target x86_64-pc-windows-msvc
 ```
 
 O instalador fica em `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/` (ou `target/release/bundle/` sem target explícito). A build assina o instalador para o atualizador e exige `TAURI_SIGNING_PRIVATE_KEY`; sem a chave, [RELEASE.md](docs/RELEASE.md) mostra como gerar um instalador só para teste. Instale o pacote NSIS `.exe` na sessão do usuário. Fechar a janela oculta o painel e mantém os serviços Rust; use **Encerrar** na bandeja para sair. Inicialização com Windows é configurável no painel. As versões exatas estão em `package-lock.json` e `src-tauri/Cargo.lock`; consulte também [VERSIONS.md](docs/VERSIONS.md).
+
+### Compilação e empacotamento no Linux (Ubuntu 22.04 / 24.04 LTS)
+
+Instale os pacotes de sistema necessários para compilar o Tauri v2 e os backends de entrada, bandeja e WebKitGTK no Ubuntu / Debian:
+
+```bash
+sudo apt-get update && sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev \
+  build-essential \
+  curl \
+  wget \
+  file \
+  libxdo-dev \
+  libssl-dev \
+  libayatana-appindicator3-dev \
+  librsvg2-dev
+```
+
+Em seguida, instale as dependências Node e gere os pacotes `.deb` e `AppImage`:
+
+```bash
+npm ci
+cargo test --manifest-path src-tauri/Cargo.toml
+npm run tauri build -- --bundles deb,appimage
+```
+
+Os pacotes gerados ficam em `src-tauri/target/release/bundle/deb/` e `src-tauri/target/release/bundle/appimage/`. No Linux, o início automático cria/remove `~/.config/autostart/pc-remote-desktop.desktop` seguindo o padrão XDG.
 
 ## Parear e usar
 
