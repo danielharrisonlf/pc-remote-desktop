@@ -1,17 +1,17 @@
 # PC Remote Desktop
 
-Controle local do Windows e Linux (Ubuntu) pelo Android, sem conta ou nuvem. Este é o repositório desktop independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.6.2, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md), [validação](docs/TESTING.md) e [como publicar uma versão](docs/RELEASE.md).
+Controle local do Windows e Linux (Ubuntu) pelo Android, sem conta ou nuvem. Este é o repositório desktop independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.6.3, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md), [validação](docs/TESTING.md) e [como publicar uma versão](docs/RELEASE.md).
 
-## Baixar e instalar — Windows 0.6.2
+## Baixar e instalar — Windows 0.6.3
 
 | Aplicativo | Download |
 |---|---|
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.2/pc-remote-desktop-0.6.2-x64-setup.exe) |
-| Android — APK universal | [Baixar APK 0.6.1](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.1-kotlin/pc-remote-android-kotlin-0.6.1-evaluation.apk) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.3/pc-remote-desktop-0.6.3-x64-setup.exe) |
+| Android — APK universal | [Baixar APK 0.6.2](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.2-kotlin/pc-remote-android-kotlin-0.6.2-evaluation.apk) |
 
-As Releases dos dois repositórios são públicas. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.2) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.1-kotlin) também incluem os hashes SHA-256.
+As Releases dos dois repositórios são públicas. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.3) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.2-kotlin) também incluem os hashes SHA-256.
 
-Instale o `.exe` no Windows e abra o PC Remote pela bandeja. **Quem usa a 0.5.0, 0.6.0 ou 0.6.1 recebe a 0.6.2 pelo próprio app** (veja [Atualizações](#atualizações)); quem usa a 0.4.0 ou anterior instala manualmente uma vez, por cima da instalação atual (mantenha a opção padrão da página do instalador e não marque a exclusão dos dados). Pareamentos e configurações são mantidos. No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
+Instale o `.exe` no Windows e abra o PC Remote pela bandeja. **Quem usa a 0.5.0, 0.6.0, 0.6.1 ou 0.6.2 recebe a 0.6.3 pelo próprio app** (veja [Atualizações](#atualizações)); quem usa a 0.4.0 ou anterior instala manualmente uma vez, por cima da instalação atual (mantenha a opção padrão da página do instalador e não marque a exclusão dos dados). Pareamentos e configurações são mantidos. No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
 
 Esta é uma versão de avaliação: APK assinado com chave debug e instalador sem Authenticode. A validação em celular físico e players reais permanece pendente; consulte [testes e limitações](docs/TESTING.md).
 
