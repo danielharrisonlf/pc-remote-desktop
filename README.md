@@ -1,17 +1,17 @@
 # PC Remote Desktop
 
-Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositório Windows independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.6.0, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md), [validação](docs/TESTING.md) e [como publicar uma versão](docs/RELEASE.md).
+Controle local do Windows pelo Android, sem conta ou nuvem. Este é o repositório Windows independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.6.1, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md), [validação](docs/TESTING.md) e [como publicar uma versão](docs/RELEASE.md).
 
-## Baixar e instalar — Windows 0.6.0
+## Baixar e instalar — Windows 0.6.1
 
 | Aplicativo | Download |
 |---|---|
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.0/pc-remote-desktop-0.6.0-x64-setup.exe) |
-| Android — APK universal | [Baixar APK 0.6.0](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.0-kotlin/pc-remote-android-kotlin-0.6.0-evaluation.apk) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.1/pc-remote-desktop-0.6.1-x64-setup.exe) |
+| Android — APK universal | [Baixar APK 0.6.1](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.1-kotlin/pc-remote-android-kotlin-0.6.1-evaluation.apk) |
 
-As Releases dos dois repositórios são públicas. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.0) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.0-kotlin) também incluem os hashes SHA-256.
+As Releases dos dois repositórios são públicas. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.1) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.1-kotlin) também incluem os hashes SHA-256.
 
-Instale o `.exe` no Windows e abra o PC Remote pela bandeja. **Quem usa a 0.5.0 recebe a 0.6.0 pelo próprio app** (veja [Atualizações](#atualizações)); quem usa a 0.4.0 ou anterior instala manualmente uma vez, por cima da instalação atual (mantenha a opção padrão da página do instalador e não marque a exclusão dos dados). Pareamentos e configurações são mantidos. No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
+Instale o `.exe` no Windows e abra o PC Remote pela bandeja. **Quem usa a 0.5.0 ou a 0.6.0 recebe a 0.6.1 pelo próprio app** (veja [Atualizações](#atualizações)); quem usa a 0.4.0 ou anterior instala manualmente uma vez, por cima da instalação atual (mantenha a opção padrão da página do instalador e não marque a exclusão dos dados). Pareamentos e configurações são mantidos. No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
 
 Esta é uma versão de avaliação: APK assinado com chave debug e instalador sem Authenticode. A validação em celular físico e players reais permanece pendente; consulte [testes e limitações](docs/TESTING.md).
 
@@ -47,7 +47,7 @@ O instalador fica em `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/` (
 2. No Android, digite o código de 8 dígitos e escolha o PC encontrado na rede, ou leia o QR. Com o código, o celular mostra uma faixa de cores que deve ser igual à exibida no PC.
 3. Confirme o pedido e o nome do celular no Windows. O código expira em 120 segundos.
 4. Pronto: touchpad, volume, mídia, arquivos e área de transferência funcionam sem ligar nada. Volume e mídia seguem as capacidades reais de cada player; o celular controla primeiro o player que o Windows trata como atual e pode abrir pesquisas do YouTube no navegador padrão do PC. Para remover acesso, revogue o dispositivo no painel.
-5. A área de transferência sincroniza em tempo real nos dois sentidos. Para parar, desligue **Sincronização em tempo real** no painel, na bandeja ou no celular; enviar texto e arquivos continua manual.
+5. A área de transferência sincroniza em tempo real nos dois sentidos. Com o celular 0.6.1-kotlin, imagens copiadas (um print, uma imagem do navegador) também vão e vêm, até 32 MB; quando a cópia tem texto e imagem, vai o texto. Para parar, desligue **Sincronização em tempo real** no painel, na bandeja ou no celular; enviar texto e arquivos continua manual.
 
 Se a rede bloquear a descoberta (mDNS), use o QR. A descoberta não prova identidade: no pareamento por código, compare as cores antes de permitir. Após reinstalar ou apagar a identidade do PC, remova o pareamento antigo e pareie novamente.
 
@@ -62,7 +62,7 @@ New-NetFirewallRule -DisplayName 'PC Remote LAN' -Direction Inbound -Action Allo
 
 ## Privacidade e assinatura
 
-Credenciais e chave TLS são protegidas com DPAPI do usuário. Clipboard só texto até 64 KiB UTF-8, sem histórico persistente e sem conteúdo em diagnóstico. A sincronização observa flags de exclusão do Windows, mas não identifica todo conteúdo sensível. A atualização do clipboard nunca cola, executa comandos ou abre links. No MVP há um controlador conectado por PC.
+Credenciais e chave TLS são protegidas com DPAPI do usuário. Clipboard com texto até 64 KiB UTF-8 e, desde a 0.6.1, imagens PNG ou JPEG até 32 MB, sem histórico persistente e sem conteúdo em diagnóstico. Imagens recebidas do celular vão só para a área de transferência, nunca para uma pasta. A sincronização observa flags de exclusão do Windows, mas não identifica todo conteúdo sensível. A atualização do clipboard nunca cola, executa comandos ou abre links. No MVP há um controlador conectado por PC.
 
 Para distribuição pública, assine executável e instalador com certificado Authenticode e timestamp do provedor usando `signtool`. Configure `bundle.windows.certificateThumbprint`/`timestampUrl` localmente ou variáveis de CI seguras. Não versione PFX, senhas, credenciais ou chaves. Um instalador sem assinatura pode disparar SmartScreen. Assinatura Authenticode é independente da identidade TLS gerada por instalação.
 
@@ -73,9 +73,17 @@ Veja [testes e pendências](docs/TESTING.md) antes de considerar a build validad
 1. Depois do pareamento o touchpad do celular já fica pronto; não há chave para ligar no PC.
 2. Deslize no touchpad para mover o cursor e toque para clicar. Os botões abaixo oferecem clique direito, duplo clique, rolagem e as teclas comuns. Digite no campo de texto e toque em **Digitar**.
 3. O alvo é o aplicativo em foco no Windows. Selecione a janela desejada antes de enviar texto. O controle não exibe a tela do PC.
-4. Para parar, toque em **Desligar** no celular. No PC, **Interromper** (em Transferência, na Visão geral ou na bandeja) desarma na hora e **bloqueia** o mouse e o teclado do celular, mesmo depois de reconectar ou reiniciar, até você clicar em **Liberar**. A conexão continua para mídia, arquivos e área de transferência.
+4. Para parar, toque em **Desligar** no celular. No PC, **Interromper** (em Transferência, na Visão geral ou na bandeja) desarma na hora e **bloqueia** o mouse, o teclado e a energia pelo celular, mesmo depois de reconectar ou reiniciar, até você clicar em **Liberar**. A conexão continua para mídia, arquivos e área de transferência.
 
 A ativação vale para a conexão: trocar de aba no Android não a desliga. Em segundo plano ou sem foco, o Android desarma o PC na hora e reativa sozinho ao voltar, na mesma conexão. Numa conexão nova o celular arma sozinho, exceto depois de **Desligar** no celular ou com o bloqueio do PC; movimentos, cliques e textos pendentes não são repetidos. Texto digitado fica somente em RAM e não entra em logs/histórico. O limite por envio é **1.024 bytes UTF-8**, sem caracteres de controle; use os botões Enter e Tab para essas teclas. Aplicativos elevados, tela de bloqueio/UAC e algumas interfaces podem recusar entrada. Teclas físicas pressionadas no PC podem interferir. Veja [INPUT.md](docs/INPUT.md) para detalhes e validações.
+
+## Energia do PC
+
+Com o celular 0.6.1-kotlin, **Conexão → Energia do PC** bloqueia, suspende, desliga ou reinicia o PC, agora ou com prazo (de 15 min a 2 h).
+
+1. Ao agendar, o PC mostra uma notificação e, para prazos de 2 min ou mais, outra 60 s antes. O cartão **Energia** da Visão geral mostra a ação, o horário e quem pediu, com **Cancelar**; a bandeja tem **Cancelar ação agendada**. O celular também cancela.
+2. **Interromper** bloqueia essas ações e cancela o agendamento até **Liberar**.
+3. Desligar e reiniciar nunca forçam o fechamento de programas: com trabalho não salvo, o Windows pergunta. O agendamento fica só na memória; fechar o PC Remote ou reiniciar o Windows o descarta.
 
 ## Arquivos nos dois sentidos
 

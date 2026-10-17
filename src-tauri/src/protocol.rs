@@ -23,12 +23,17 @@ pub struct Features {
     pub files_v2: bool,
     pub search: bool,
     pub info: bool,
+    /// power.v1: lock, sleep, shut down and restart the PC.
+    pub power: bool,
+    /// clipboard.v2 on top of files.v2, its transport: images in the clipboard.
+    pub clipboard_image: bool,
 }
 
 impl Features {
     /// Reads every header line and every comma or whitespace separated token.
     pub fn parse<'a>(values: impl IntoIterator<Item = &'a [u8]>) -> Self {
         let mut features = Self::default();
+        let mut clipboard_v2 = false;
         for value in values {
             let Ok(text) = std::str::from_utf8(value) else {
                 continue;
@@ -43,10 +48,13 @@ impl Features {
                     }
                     "search.v1" => features.search = true,
                     "info.v1" => features.info = true,
+                    "power.v1" => features.power = true,
+                    "clipboard.v2" => clipboard_v2 = true,
                     _ => {}
                 }
             }
         }
+        features.clipboard_image = clipboard_v2 && features.files_v2;
         features
     }
 
@@ -155,6 +163,9 @@ pub enum Action {
         name: String,
         size: u64,
         mime: String,
+        /// clipboard.v2: the image goes to the Windows clipboard instead of Downloads.
+        #[serde(default)]
+        clipboard: Option<ClipboardOffer>,
     },
     #[serde(rename = "file.cancel")]
     FileCancel {
@@ -174,7 +185,44 @@ pub enum Action {
         service: SearchService,
         query: String,
     },
+    /// power.v1: now (0) or scheduled (1..86400 s); one schedule per PC.
+    #[serde(rename = "power.run")]
+    PowerRun {
+        action: PowerAction,
+        #[serde(rename = "delaySeconds")]
+        delay_seconds: u32,
+    },
+    /// power.v1: drops the schedule, if any. A struct variant so extra fields are refused.
+    #[serde(rename = "power.cancel")]
+    PowerCancel {},
 }
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PowerAction {
+    Lock,
+    Sleep,
+    Shutdown,
+    Restart,
+}
+
+/// Longest `power.run` delay: 24 h.
+pub const MAX_POWER_DELAY: u32 = 86_400;
+
+/// clipboard.v2 fields of a `file.offer`, with the rules of `clipboard.set`.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ClipboardOffer {
+    #[serde(rename = "eventId")]
+    pub event_id: Uuid,
+    pub automatic: bool,
+    #[serde(rename = "baseRevision")]
+    pub base_revision: u64,
+}
+
+/// clipboard.v2 image limits, in both directions.
+pub const MAX_IMAGE_BYTES: u64 = 33_554_432;
+pub const MAX_IMAGE_PIXELS: u64 = 50_000_000;
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -314,6 +362,19 @@ impl Action {
             Self::FileOffer { .. } | Self::FileCancel { .. } | Self::FileDecline { .. }
         )
     }
+    pub fn is_power(&self) -> bool {
+        matches!(self, Self::PowerRun { .. } | Self::PowerCancel {})
+    }
+    /// A clipboard.v2 image offer, which reports the image limits on errors.
+    pub fn is_clipboard_image(&self) -> bool {
+        matches!(
+            self,
+            Self::FileOffer {
+                clipboard: Some(_),
+                ..
+            }
+        )
+    }
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -335,11 +396,12 @@ pub enum MediaCommand {
 /// Field rules that do not depend on the connection: files.v1 offers and every other action.
 #[cfg(test)]
 pub fn validate_action(action: &Action) -> Result<(), &'static str> {
-    validate_action_for(action, false)
+    validate_action_for(action, &Features::default())
 }
 
-/// Same rules, with `file.offer` checked against files.v2 when the connection negotiated it.
-pub fn validate_action_for(action: &Action, files_v2: bool) -> Result<(), &'static str> {
+/// Same rules, with `file.offer` checked against what the connection negotiated:
+/// files.v2 for any file, clipboard.v2 for the `clipboard` field.
+pub fn validate_action_for(action: &Action, negotiated: &Features) -> Result<(), &'static str> {
     match action {
         Action::VolumeSet { percent } if *percent > 100 => Err("invalid_message"),
         Action::VolumeStep { delta } if *delta != -5 && *delta != 5 => Err("invalid_message"),
@@ -384,16 +446,31 @@ pub fn validate_action_for(action: &Action, files_v2: bool) -> Result<(), &'stat
             Err("invalid_message")
         }
         Action::FileOffer {
-            transfer_id,
-            name,
-            size,
-            mime,
-        } if files_v2 => crate::files::check_offer_v2(*transfer_id, name, *size, mime).map(|_| ()),
+            clipboard: Some(clipboard),
+            ..
+        } if !negotiated.clipboard_image || clipboard.event_id.is_nil() => Err("invalid_message"),
         Action::FileOffer {
             transfer_id,
             name,
             size,
             mime,
+            clipboard: Some(_),
+        } => crate::files::check_clipboard_offer(*transfer_id, name, *size, mime).map(|_| ()),
+        Action::FileOffer {
+            transfer_id,
+            name,
+            size,
+            mime,
+            ..
+        } if negotiated.files_v2 => {
+            crate::files::check_offer_v2(*transfer_id, name, *size, mime).map(|_| ())
+        }
+        Action::FileOffer {
+            transfer_id,
+            name,
+            size,
+            mime,
+            ..
         } => crate::files::check_offer(*transfer_id, name, *size, mime).map(|_| ()),
         Action::FileCancel { transfer_id } | Action::FileDecline { transfer_id, .. }
             if transfer_id.is_nil() =>
@@ -401,6 +478,14 @@ pub fn validate_action_for(action: &Action, files_v2: bool) -> Result<(), &'stat
             Err("invalid_message")
         }
         Action::SearchOpen { query, .. } => search_query(query).map(|_| ()),
+        Action::PowerRun {
+            action,
+            delay_seconds,
+        } if *delay_seconds > MAX_POWER_DELAY
+            || (*action == PowerAction::Lock && *delay_seconds != 0) =>
+        {
+            Err("invalid_message")
+        }
         _ => Ok(()),
     }
 }
@@ -472,6 +557,25 @@ pub struct StateSnapshot {
     pub input: Option<InputState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub files: Option<FilesState>,
+    /// power.v1 only; older phones refuse unknown fields.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub power: Option<PowerState>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PowerState {
+    /// False while "Interromper" blocks the phone's control of the PC.
+    pub allowed: bool,
+    /// Serialized as `null` when nothing is scheduled.
+    pub scheduled: Option<ScheduledPower>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ScheduledPower {
+    pub action: PowerAction,
+    /// 1..86400, rounded up when the snapshot was built.
+    #[serde(rename = "remainingSeconds")]
+    pub remaining_seconds: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -513,6 +617,8 @@ pub enum Wording {
     Control,
     FilesV1,
     FilesV2,
+    /// clipboard.v2 images.
+    Image,
 }
 
 /// pt-BR message and retry hint for an error code. File actions report their own size limit.
@@ -528,6 +634,7 @@ pub fn error_text(code: &str, wording: Wording) -> (&'static str, bool) {
         "sensitive" => ("Conteúdo marcado como sensível", false),
         "too_large" if wording == Wording::FilesV2 => ("Arquivo excede 1 GB", false),
         "too_large" if wording == Wording::FilesV1 => ("Arquivo excede 50 MB", false),
+        "too_large" if wording == Wording::Image => ("Imagem excede 32 MB", false),
         "too_large" => ("Texto excede 64 KiB", false),
         "clipboard_busy" => ("Área de transferência ocupada", true),
         "invalid_message" => ("Mensagem inválida", false),
@@ -620,8 +727,16 @@ mod tests {
                 files: true,
                 files_v2: true,
                 search: true,
-                info: true
+                info: true,
+                ..Features::default()
             }
+        );
+        let negotiated = Features::parse(
+            section["headers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|h| h.as_str().unwrap().as_bytes()),
         );
         for raw in section["client"].as_array().unwrap() {
             let ClientMessage::Request { action, .. } =
@@ -629,12 +744,13 @@ mod tests {
             else {
                 panic!("{raw}")
             };
-            validate_action_for(&action, true).unwrap_or_else(|code| panic!("{code}: {raw}"));
+            validate_action_for(&action, &negotiated)
+                .unwrap_or_else(|code| panic!("{code}: {raw}"));
         }
         for raw in section["invalidClient"].as_array().unwrap() {
             let invalid = match serde_json::from_value::<ClientMessage>(raw.clone()) {
                 Ok(ClientMessage::Request { action, .. }) => {
-                    validate_action_for(&action, true).is_err()
+                    validate_action_for(&action, &negotiated).is_err()
                 }
                 Ok(_) => false,
                 Err(_) => true,
@@ -654,7 +770,118 @@ mod tests {
         // The v1 rules still refuse what only files.v2 accepts.
         let video = &section["client"][0]["action"];
         let action: Action = serde_json::from_value(video.clone()).unwrap();
-        assert_eq!(validate_action_for(&action, false), Err("too_large"));
+        assert_eq!(
+            validate_action_for(&action, &Features::default()),
+            Err("too_large")
+        );
+    }
+
+    #[test]
+    fn negotiated_061_golden_examples() {
+        let examples: serde_json::Value =
+            serde_json::from_str(include_str!("../../docs/protocol-v1.examples.json")).unwrap();
+        let section = &examples["negotiated061"];
+        let negotiated = Features::parse(
+            section["headers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|h| h.as_str().unwrap().as_bytes()),
+        );
+        assert_eq!(
+            negotiated,
+            Features {
+                input: true,
+                files: true,
+                files_v2: true,
+                search: true,
+                info: true,
+                power: true,
+                clipboard_image: true,
+            }
+        );
+        let without_clipboard = Features {
+            clipboard_image: false,
+            ..negotiated
+        };
+        let mut image_offers = 0;
+        for raw in section["client"].as_array().unwrap() {
+            let ClientMessage::Request { action, .. } =
+                serde_json::from_value::<ClientMessage>(raw.clone()).unwrap()
+            else {
+                panic!("{raw}")
+            };
+            validate_action_for(&action, &negotiated)
+                .unwrap_or_else(|code| panic!("{code}: {raw}"));
+            // The clipboard field exists only on clipboard.v2 connections.
+            if action.is_clipboard_image() {
+                image_offers += 1;
+                assert_eq!(
+                    validate_action_for(&action, &without_clipboard),
+                    Err("invalid_message"),
+                    "{raw}"
+                );
+            }
+        }
+        assert_eq!(image_offers, 2);
+        let mut codes = Vec::new();
+        for raw in section["invalidClient"].as_array().unwrap() {
+            match serde_json::from_value::<ClientMessage>(raw.clone()) {
+                Ok(ClientMessage::Request { action, .. }) => {
+                    codes.push(validate_action_for(&action, &negotiated).unwrap_err())
+                }
+                Ok(_) => panic!("{raw}"),
+                Err(_) => codes.push("parse"),
+            }
+        }
+        assert_eq!(
+            codes,
+            [
+                "invalid_message",
+                "invalid_message",
+                "parse",
+                "parse",
+                "parse",
+                "parse",
+                "file_type",
+                "too_large",
+                "parse",
+                "parse"
+            ]
+        );
+        // Only negotiated headers count: clipboard.v2 needs files.v2, its transport.
+        let lone = Features::parse([b"clipboard.v2".as_slice(), b"files.v1"]);
+        assert!(!lone.clipboard_image);
+        let with_files = Features::parse([b"files.v2, clipboard.v2".as_slice()]);
+        assert!(with_files.clipboard_image && with_files.files_v2);
+        assert!(Features::parse([b"power.v1".as_slice()]).power);
+    }
+
+    #[test]
+    fn power_state_serializes_null_and_remaining_seconds() {
+        let idle = PowerState {
+            allowed: true,
+            scheduled: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&idle).unwrap(),
+            serde_json::json!({"allowed":true,"scheduled":null})
+        );
+        let scheduled = PowerState {
+            allowed: false,
+            scheduled: Some(ScheduledPower {
+                action: PowerAction::Shutdown,
+                remaining_seconds: 1740,
+            }),
+        };
+        assert_eq!(
+            serde_json::to_value(&scheduled).unwrap(),
+            serde_json::json!({"allowed":false,"scheduled":{"action":"shutdown","remainingSeconds":1740}})
+        );
+        assert_eq!(
+            error_text("too_large", Wording::Image),
+            ("Imagem excede 32 MB", false)
+        );
     }
 
     #[test]
@@ -673,6 +900,7 @@ mod tests {
             name: name.into(),
             size,
             mime: mime.into(),
+            clipboard: None,
         };
         assert_eq!(validate_action(&offer("a.png", 1, "image/png")), Ok(()));
         assert_eq!(
@@ -707,7 +935,8 @@ mod tests {
                 transfer_id: Uuid::nil(),
                 name: "a.png".into(),
                 size: 1,
-                mime: "image/png".into()
+                mime: "image/png".into(),
+                clipboard: None,
             }),
             Err("invalid_message")
         );

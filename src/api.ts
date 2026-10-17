@@ -8,13 +8,15 @@ export const desktopApi = {
   approvePairing: (id: string, approved: boolean) => invoke<void>('approve_pairing', { id, approved }),
   revokeDevice: (id: string) => invoke<void>('revoke_device', { id }),
   updateSettings: (settings: Settings) => invoke<void>('update_settings', { settings }),
-  /** Disarms mouse and keyboard and blocks them until `unblockInput`. */
+  /** Disarms mouse and keyboard and blocks them and power actions until `unblockInput`; drops a schedule. */
   stopInput: () => invoke<void>('stop_input'),
   unblockInput: () => invoke<void>('unblock_input'),
   /** Native picker; queues the chosen files for the phone and resolves to one message per file left out. */
   sendFilesDialog: () => invoke<string[]>('send_files_dialog'),
   cancelOutgoing: () => invoke<void>('cancel_outgoing'),
   clearOutgoing: () => invoke<void>('clear_outgoing'),
+  /** Cancels the lock, sleep, shutdown or restart a phone scheduled. */
+  cancelPower: () => invoke<void>('cancel_power'),
   /** Opens a project GitHub release URL in the default browser (allowlisted in Rust). */
   openUrl: (url: string) => invoke<void>('open_url', { url }),
   /** Creates Downloads\PC Remote if needed and opens it in Explorer. */

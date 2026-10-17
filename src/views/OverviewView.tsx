@@ -1,10 +1,10 @@
-import { ArrowRight, ClipboardList, Monitor, QrCode, Smartphone, Upload } from 'lucide-react';
+import { ArrowRight, ClipboardList, Monitor, QrCode, Smartphone, Upload, X } from 'lucide-react';
 import { desktopApi } from '../api';
 import { Button } from '../components/Button';
 import { DeviceRow, PendingRequest } from '../components/DeviceItems';
 import { EmptyState } from '../components/EmptyState';
 import { SettingSwitch } from '../components/Switch';
-import { clipboardSummary, sendSummary } from './summaries';
+import { clipboardSummary, powerSummary, sendSummary } from './summaries';
 import { InputControls, useSendFiles } from './TransferView';
 import type { ViewProps } from './viewProps';
 
@@ -39,6 +39,25 @@ export function OverviewView({ status, settings, changeSettings, run, isBusy, se
           </Button>
         </div>
       </section>
+
+      {status.powerScheduled ? (
+        <section className="card" aria-labelledby="overview-power">
+          <header className="card-header">
+            <h2 id="overview-power" className="card-title">
+              Energia
+            </h2>
+          </header>
+          <div className="kill-switch" role="status">
+            <div>
+              <p className="kill-title">{powerSummary(status.powerScheduled, now)}</p>
+              <p className="muted">Cancele aqui ou no ícone da bandeja. Interromper também cancela.</p>
+            </div>
+            <Button variant="secondary" icon={X} loading={isBusy('cancelPower')} onClick={() => void run('cancelPower', desktopApi.cancelPower, 'Ação agendada cancelada.')}>
+              Cancelar
+            </Button>
+          </div>
+        </section>
+      ) : null}
 
       <div className="overview-grid">
         <section className="card" aria-labelledby="overview-devices">

@@ -964,5 +964,361 @@
         }
       ]
     }
+  },
+  "negotiated061": {
+    "headers": [
+      "input.v1",
+      "files.v1",
+      "files.v2",
+      "search.v1",
+      "info.v1",
+      "power.v1",
+      "clipboard.v2"
+    ],
+    "client": [
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf800",
+        "action": {
+          "kind": "power.run",
+          "action": "lock",
+          "delaySeconds": 0
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf801",
+        "action": {
+          "kind": "power.run",
+          "action": "sleep",
+          "delaySeconds": 1800
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf802",
+        "action": {
+          "kind": "power.run",
+          "action": "shutdown",
+          "delaySeconds": 86400
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf803",
+        "action": {
+          "kind": "power.run",
+          "action": "restart",
+          "delaySeconds": 0
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf804",
+        "action": {
+          "kind": "power.cancel"
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf805",
+        "action": {
+          "kind": "file.offer",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e61",
+          "name": "Imagem.png",
+          "size": 2457600,
+          "mime": "image/png",
+          "clipboard": {
+            "eventId": "3f1c2b4a-5d6e-4f70-8a9b-0c1d2e3f4a61",
+            "automatic": true,
+            "baseRevision": 7
+          }
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf806",
+        "action": {
+          "kind": "file.offer",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e61",
+          "name": "IMG_2026.jpg",
+          "size": 33554432,
+          "mime": "image/jpeg",
+          "clipboard": {
+            "eventId": "3f1c2b4a-5d6e-4f70-8a9b-0c1d2e3f4a61",
+            "automatic": false,
+            "baseRevision": 0
+          }
+        }
+      }
+    ],
+    "server": [
+      {
+        "v": 1,
+        "type": "welcome",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf632",
+        "pcId": "36c7f5c2-9a39-43a5-a541-082f745dfd01",
+        "pcName": "PC de teste",
+        "capabilities": [
+          "audio",
+          "media",
+          "clipboard.text",
+          "input.control",
+          "file.transfer",
+          "file.receive",
+          "search.youtube",
+          "power.control",
+          "clipboard.image"
+        ],
+        "os": "Windows 11"
+      },
+      {
+        "v": 1,
+        "type": "state",
+        "revision": 4,
+        "audio": {
+          "available": true,
+          "percent": 35,
+          "muted": false,
+          "error": null
+        },
+        "media": {
+          "sessions": []
+        },
+        "clipboardRevision": 7,
+        "sync": {
+          "upload": true,
+          "download": true,
+          "paused": false
+        },
+        "input": {
+          "allowed": true,
+          "enabled": false
+        },
+        "files": {
+          "allowed": true,
+          "maxBytes": 1073741824
+        },
+        "power": {
+          "allowed": true,
+          "scheduled": {
+            "action": "shutdown",
+            "remainingSeconds": 1740
+          }
+        }
+      },
+      {
+        "v": 1,
+        "type": "state",
+        "revision": 5,
+        "audio": {
+          "available": true,
+          "percent": 35,
+          "muted": false,
+          "error": null
+        },
+        "media": {
+          "sessions": []
+        },
+        "clipboardRevision": 7,
+        "sync": {
+          "upload": true,
+          "download": true,
+          "paused": false
+        },
+        "input": {
+          "allowed": false,
+          "enabled": false
+        },
+        "files": {
+          "allowed": true,
+          "maxBytes": 1073741824
+        },
+        "power": {
+          "allowed": false,
+          "scheduled": null
+        }
+      },
+      {
+        "v": 1,
+        "type": "file.push",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e61",
+        "name": "Imagem do PC.png",
+        "size": 1048576,
+        "mime": "image/png",
+        "ticket": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "clipboard": {
+          "revision": 8,
+          "automatic": true
+        }
+      },
+      {
+        "v": 1,
+        "type": "file.push",
+        "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e61",
+        "name": "Imagem do PC.png",
+        "size": 33554432,
+        "mime": "image/png",
+        "ticket": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "clipboard": {
+          "revision": 8,
+          "automatic": false
+        }
+      }
+    ],
+    "invalidClient": [
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf810",
+        "action": {
+          "kind": "power.run",
+          "action": "lock",
+          "delaySeconds": 60
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf811",
+        "action": {
+          "kind": "power.run",
+          "action": "shutdown",
+          "delaySeconds": 86401
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf812",
+        "action": {
+          "kind": "power.run",
+          "action": "hibernate",
+          "delaySeconds": 0
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf813",
+        "action": {
+          "kind": "power.run",
+          "action": "shutdown",
+          "delaySeconds": -1
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf814",
+        "action": {
+          "kind": "power.run",
+          "action": "restart"
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf815",
+        "action": {
+          "kind": "power.cancel",
+          "force": true
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf816",
+        "action": {
+          "kind": "file.offer",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e61",
+          "name": "anim.gif",
+          "size": 1024,
+          "mime": "image/gif",
+          "clipboard": {
+            "eventId": "3f1c2b4a-5d6e-4f70-8a9b-0c1d2e3f4a61",
+            "automatic": true,
+            "baseRevision": 7
+          }
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf817",
+        "action": {
+          "kind": "file.offer",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e61",
+          "name": "Imagem.png",
+          "size": 33554433,
+          "mime": "image/png",
+          "clipboard": {
+            "eventId": "3f1c2b4a-5d6e-4f70-8a9b-0c1d2e3f4a61",
+            "automatic": true,
+            "baseRevision": 7
+          }
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf818",
+        "action": {
+          "kind": "file.offer",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e61",
+          "name": "Imagem.png",
+          "size": 1024,
+          "mime": "image/png",
+          "clipboard": {
+            "automatic": true,
+            "baseRevision": 7
+          }
+        }
+      },
+      {
+        "v": 1,
+        "type": "request",
+        "id": "a44a8701-91d6-4497-8eb5-9300a18bf819",
+        "action": {
+          "kind": "file.offer",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e61",
+          "name": "Imagem.png",
+          "size": 1024,
+          "mime": "image/png",
+          "clipboard": {
+            "eventId": "3f1c2b4a-5d6e-4f70-8a9b-0c1d2e3f4a61",
+            "automatic": true,
+            "baseRevision": 7,
+            "text": "x"
+          }
+        }
+      }
+    ],
+    "fileSocket": {
+      "server": [
+        {
+          "v": 1,
+          "type": "file.done",
+          "id": "b55b9812-02e7-45a8-9fc6-0411b29cf861",
+          "transferId": "7d0b5f6e-2c1a-4e8b-9f3d-5a6b7c8d9e61",
+          "name": "Área de transferência"
+        },
+        {
+          "v": 1,
+          "type": "error",
+          "id": "b55b9812-02e7-45a8-9fc6-0411b29cf861",
+          "code": "conflict",
+          "message": "Houve outra cópia antes desta",
+          "retryable": false
+        }
+      ]
+    }
   }
 }

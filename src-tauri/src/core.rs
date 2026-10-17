@@ -1,6 +1,9 @@
 pub use crate::pairing::{Pairing, Pending, PendingView};
 use crate::{
-    audio, clipboard,
+    audio,
+    clip_images::ImageWriter,
+    clipboard,
+    energy::{PowerScheduleView, PowerSystem, Scheduled},
     files::{FileEntry, IncomingFile, Slot},
     media,
     outbox::{Outbox, OutgoingFile, OutgoingResult},
@@ -48,13 +51,24 @@ pub enum TransferDirection {
     #[serde(rename = "toPc")]
     ToPc,
 }
-/// Clipboard transfer metadata for the desktop panel. The copied text itself is
+#[derive(Clone, Copy, Serialize, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum TransferKind {
+    Text,
+    /// clipboard.v2.
+    Image,
+}
+/// Clipboard transfer metadata for the desktop panel. The copied text or image itself is
 /// never retained: only direction, time, size and whether it was automatic.
 #[derive(Clone, Serialize)]
 pub struct TransferEntry {
     pub at: u64,
     pub direction: TransferDirection,
+    pub kind: TransferKind,
+    /// Text only; 0 for images.
     pub characters: usize,
+    /// Images only; 0 for text.
+    pub bytes: u64,
     pub automatic: bool,
 }
 const MAX_DIAGNOSTICS: usize = 20;
@@ -94,6 +108,9 @@ pub struct Status {
     /// The connected phone negotiated files.v2 and accepts files from the PC.
     #[serde(rename = "phoneReceivesFiles")]
     pub phone_receives_files: bool,
+    /// power.v1: the action a phone scheduled on this PC.
+    #[serde(rename = "powerScheduled")]
+    pub power_scheduled: Option<PowerScheduleView>,
 }
 #[derive(Clone)]
 pub enum Outgoing {
@@ -128,6 +145,13 @@ pub struct Runtime {
     pub input_events: VecDeque<Instant>,
     pub files_feature: bool,
     pub files_v2: bool,
+    /// clipboard.v2 negotiated on this session (with files.v2).
+    pub clipboard_image: bool,
+    /// power.v1 negotiated on this session.
+    pub power_feature: bool,
+    /// One schedule per PC, whatever phone made it; RAM only.
+    pub power_schedule: Option<Scheduled>,
+    pub power_events: VecDeque<Instant>,
     pub file_slot: Option<Slot>,
     pub outbox: Outbox,
     pub file_history: VecDeque<FileEntry>,
@@ -148,15 +172,44 @@ impl Runtime {
         self.last_seen.insert(id, now_ms());
     }
     fn record_transfer(&mut self, direction: TransferDirection, text: &str, automatic: bool) {
+        self.push_transfer(TransferEntry {
+            at: now_ms(),
+            direction,
+            kind: TransferKind::Text,
+            characters: text.chars().count(),
+            bytes: 0,
+            automatic,
+        });
+    }
+    pub(crate) fn record_image(
+        &mut self,
+        direction: TransferDirection,
+        bytes: u64,
+        automatic: bool,
+    ) {
+        self.push_transfer(TransferEntry {
+            at: now_ms(),
+            direction,
+            kind: TransferKind::Image,
+            characters: 0,
+            bytes,
+            automatic,
+        });
+    }
+    fn push_transfer(&mut self, entry: TransferEntry) {
         if self.transfers.len() == MAX_TRANSFERS {
             self.transfers.pop_front();
         }
-        self.transfers.push_back(TransferEntry {
-            at: now_ms(),
-            direction,
-            characters: text.chars().count(),
-            automatic,
-        });
+        self.transfers.push_back(entry);
+    }
+    /// What a session negotiated, cleared when it ends.
+    fn clear_session_features(&mut self) {
+        self.client_sync = SyncSettings::default();
+        self.input_feature = false;
+        self.input_enabled = false;
+        self.input_events.clear();
+        self.power_feature = false;
+        self.clipboard_image = false;
     }
 }
 /// Shows a native notification (title, body). Injected so tests never show toasts.
@@ -171,6 +224,10 @@ pub struct Core {
     pub(crate) files_root: Option<PathBuf>,
     pub(crate) files_cleaned: AtomicBool,
     pub(crate) notifier: OnceLock<Notifier>,
+    /// power.v1 actions; only the app installs the real one (lib.rs).
+    pub(crate) power_system: OnceLock<Box<dyn PowerSystem>>,
+    /// clipboard.v2 writes of images from the phone; only the app installs the real one.
+    pub(crate) image_writer: OnceLock<ImageWriter>,
 }
 
 pub(crate) fn now_ms() -> u64 {
@@ -274,6 +331,10 @@ impl Core {
                 input_events: VecDeque::new(),
                 files_feature: false,
                 files_v2: false,
+                clipboard_image: false,
+                power_feature: false,
+                power_schedule: None,
+                power_events: VecDeque::new(),
                 file_slot: None,
                 outbox: Outbox::default(),
                 file_history: VecDeque::new(),
@@ -287,6 +348,8 @@ impl Core {
             files_root,
             files_cleaned: AtomicBool::new(false),
             notifier: OnceLock::new(),
+            power_system: OnceLock::new(),
+            image_writer: OnceLock::new(),
         })
     }
     pub fn set_notifier(&self, notifier: Notifier) {
@@ -339,6 +402,7 @@ impl Core {
             outgoing_queue: s.outbox.queued(),
             outgoing_result: s.outbox.last(),
             phone_receives_files: s.connected.is_some() && s.files_v2,
+            power_scheduled: s.power_view(),
         }
     }
     pub fn connect_authenticated(
@@ -371,14 +435,15 @@ impl Core {
         s.connected = Some(id);
         s.mark_seen(id);
         s.connection_epoch = s.connection_epoch.wrapping_add(1);
-        s.client_sync = SyncSettings::default();
+        s.clear_session_features();
         s.input_feature = features.input;
-        s.input_enabled = false;
-        s.input_events.clear();
         s.abort_file();
+        s.drop_clipboard_push();
         s.abort_outgoing("A conexão com o celular foi reiniciada.");
         s.files_feature = features.files;
         s.files_v2 = features.files_v2;
+        s.clipboard_image = features.clipboard_image && features.files_v2;
+        s.power_feature = features.power;
         Ok(s.connection_epoch)
     }
     pub fn is_authorized_session(&self, id: Uuid, epoch: u64) -> bool {
@@ -396,10 +461,7 @@ impl Core {
         if s.connected == Some(id) && s.connection_epoch == epoch {
             s.connected = None;
             s.mark_seen(id);
-            s.client_sync = SyncSettings::default();
-            s.input_feature = false;
-            s.input_enabled = false;
-            s.input_events.clear();
+            s.clear_session_features();
             s.end_file_session();
         }
     }
@@ -411,7 +473,7 @@ impl Core {
             Ok(())
         })
     }
-    fn revoke_with_save(
+    pub(crate) fn revoke_with_save(
         &self,
         id: Uuid,
         save: impl FnOnce(&Secrets) -> Result<(), String>,
@@ -424,13 +486,17 @@ impl Core {
         // Keep the credential list consistent with disk for a deletion retry.
         s.revoked_devices.insert(id);
         s.last_seen.remove(&id);
+        // A revoked phone's schedule goes with it; another connected phone hears of it.
+        if s.power_schedule.as_ref().is_some_and(|p| p.device == id) {
+            s.drop_power_schedule();
+            if s.connected.is_some_and(|connected| connected != id) {
+                self.publish_state_locked(&s);
+            }
+        }
         if s.connected == Some(id) {
             s.connected = None;
             s.connection_epoch = s.connection_epoch.wrapping_add(1);
-            s.client_sync = SyncSettings::default();
-            s.input_feature = false;
-            s.input_enabled = false;
-            s.input_events.clear();
+            s.clear_session_features();
             s.end_file_session();
             s.revision += 1;
             let _ = self.events.send(Outgoing::Close { device_id: id });
@@ -497,6 +563,8 @@ impl Core {
         if blocked {
             s.input_enabled = false;
             s.input_events.clear();
+            // "Interromper" also blocks power actions and drops what was scheduled.
+            s.power_schedule = None;
         }
         s.settings = next;
         s.revision += 1;
@@ -533,6 +601,7 @@ impl Core {
                     protocol::MAX_FILE_BYTES
                 },
             }),
+            power: s.power_state(),
         }
     }
     #[cfg(test)]
@@ -604,7 +673,7 @@ impl Core {
         s.input_events.push_back(now);
         crate::input::execute(action).map_err(str::to_string)
     }
-    fn publish_state_locked(&self, s: &Runtime) {
+    pub(crate) fn publish_state_locked(&self, s: &Runtime) {
         if let Some(id) = s.connected {
             let _ = self.events.send(Outgoing::Wire {
                 device_id: id,
@@ -670,32 +739,44 @@ impl Core {
         s.revision += 1;
         self.publish_state_locked(&s);
     }
+    /// A copy in Windows. Text goes in a `clipboard.event`; without text, a clipboard.v2
+    /// session gets the image as a push (read and converted after the lock is released).
     pub fn clipboard_event_local(&self, sequence: u32) {
-        let mut s = self.state.lock().unwrap();
-        if sequence == s.clipboard_sequence || sequence == s.suppressed_sequence {
-            return;
-        }
-        if clipboard::sequence() != sequence {
-            return;
-        }
-        let permitted = s.settings.realtime
-            && s.client_sync.download
-            && !s.client_sync.paused
-            && s.connected
-                .is_some_and(|id| !s.revoked_devices.contains(&id));
-        let text = if permitted && s.connected.is_some() {
-            clipboard::read().ok().flatten()
-        } else {
-            None
+        let image = {
+            let mut s = self.state.lock().unwrap();
+            if sequence == s.clipboard_sequence || sequence == s.suppressed_sequence {
+                return;
+            }
+            if clipboard::sequence() != sequence {
+                return;
+            }
+            // Any newer copy replaces an image still on its way to the phone.
+            s.drop_clipboard_push();
+            let read = s.download_permitted().then(clipboard::read);
+            if clipboard::sequence() != sequence {
+                return;
+            }
+            s.clipboard_sequence = sequence;
+            s.clipboard_revision += 1;
+            s.revision += 1;
+            self.publish_state_locked(&s);
+            match read {
+                Some(Ok(Some(text))) => {
+                    self.send_text_event(&mut s, text);
+                    None
+                }
+                Some(Ok(None)) if s.clipboard_image => s
+                    .connected
+                    .map(|device| (device, s.connection_epoch, s.clipboard_revision)),
+                _ => None,
+            }
         };
-        if clipboard::sequence() != sequence {
-            return;
+        if let Some((device, epoch, revision)) = image {
+            self.clipboard_image_local(sequence, device, epoch, revision);
         }
-        s.clipboard_sequence = sequence;
-        s.clipboard_revision += 1;
-        s.revision += 1;
-        self.publish_state_locked(&s);
-        if let (Some(device_id), Some(text)) = (s.connected, text) {
+    }
+    fn send_text_event(&self, s: &mut Runtime, text: String) {
+        if let Some(device_id) = s.connected {
             s.record_transfer(TransferDirection::ToPhone, &text, true);
             let event = protocol::ClipboardEvent {
                 v: 1,
@@ -715,10 +796,19 @@ impl Core {
     pub fn clipboard_get(&self, device: Uuid) -> Result<(), String> {
         let mut s = self.state.lock().unwrap();
         let before = clipboard::sequence();
-        let text = clipboard::read()?.ok_or("unavailable")?;
+        let text = clipboard::read()?;
         if clipboard::sequence() != before {
             return Err("clipboard_busy".into());
         }
+        let Some(text) = text else {
+            // clipboard.v2: no text, so the image, if there is one, goes as a push.
+            if !s.clipboard_image {
+                return Err("unavailable".into());
+            }
+            let (epoch, revision) = (s.connection_epoch, s.clipboard_revision);
+            drop(s);
+            return self.clipboard_image_get(device, epoch, revision);
+        };
         s.record_transfer(TransferDirection::ToPhone, &text, false);
         let event = protocol::ClipboardEvent {
             v: 1,
@@ -808,10 +898,7 @@ impl Core {
         if let Some(device_id) = s.connected.take() {
             s.mark_seen(device_id);
             s.connection_epoch = s.connection_epoch.wrapping_add(1);
-            s.client_sync = SyncSettings::default();
-            s.input_feature = false;
-            s.input_enabled = false;
-            s.input_events.clear();
+            s.clear_session_features();
             s.end_file_session();
             let _ = self.events.send(Outgoing::Close { device_id });
             drop(s);

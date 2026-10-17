@@ -4,6 +4,9 @@
 //! time is announced with `file.push` on the control socket; the phone redeems
 //! the single-use ticket on `/v1/files` with `file.fetch` and confirms what it
 //! wrote with `file.progress`. Nothing is retried automatically.
+//!
+//! clipboard.v2 images ride the same queue as temporary PNG files: ahead of the files
+//! that wait, one at a time (a newer copy replaces the older), hidden from the panel.
 use crate::{
     core::{constant_time_eq, now_ms, Core, Outgoing, Runtime, TransferDirection},
     files::{self, SafeName},
@@ -30,6 +33,23 @@ pub struct OutItem {
     pub path: PathBuf,
     pub name: SafeName,
     pub size: u64,
+    /// clipboard.v2: a temporary PNG for the phone's clipboard, deleted when it leaves.
+    pub clipboard: Option<ClipPush>,
+}
+
+/// The `clipboard` field of a `file.push`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClipPush {
+    pub revision: u64,
+    pub automatic: bool,
+}
+
+impl OutItem {
+    fn discard(&self) {
+        if self.clipboard.is_some() {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
 }
 
 /// Wakes the socket task; `by_user` tells it to say "Envio cancelado no PC.".
@@ -85,23 +105,30 @@ pub struct Fetched {
     pub name: String,
     pub size: u64,
     pub abort: Arc<Abort>,
+    /// A clipboard image: no panel messages.
+    pub clipboard: bool,
 }
 
 impl Outbox {
+    /// The file in flight, unless it is a clipboard image.
     pub fn active(&self) -> Option<OutgoingFile> {
-        self.active.as_ref().map(|a| OutgoingFile {
-            name: a.item.name.file_name(),
-            bytes: a.item.size,
-            sent: match a.phase {
-                Phase::Sending { confirmed, .. } => confirmed,
-                Phase::Offered { .. } => 0,
-            },
-            waiting: matches!(a.phase, Phase::Offered { .. }),
-        })
+        self.active
+            .as_ref()
+            .filter(|a| a.item.clipboard.is_none())
+            .map(|a| OutgoingFile {
+                name: a.item.name.file_name(),
+                bytes: a.item.size,
+                sent: match a.phase {
+                    Phase::Sending { confirmed, .. } => confirmed,
+                    Phase::Offered { .. } => 0,
+                },
+                waiting: matches!(a.phase, Phase::Offered { .. }),
+            })
     }
     pub fn queued(&self) -> Vec<String> {
         self.queue
             .iter()
+            .filter(|item| item.clipboard.is_none())
             .map(|item| item.name.file_name())
             .collect()
     }
@@ -123,6 +150,7 @@ impl Runtime {
     }
 
     /// Ends the active file with `reason`; the queue stays for the next connection.
+    /// A clipboard image just goes away.
     pub(crate) fn abort_outgoing(&mut self, reason: &str) {
         let Some(active) = self.outbox.active.take() else {
             return;
@@ -130,12 +158,53 @@ impl Runtime {
         if let Phase::Sending { abort, .. } = &active.phase {
             abort.notify.notify_one();
         }
+        if active.item.clipboard.is_some() {
+            active.item.discard();
+            return;
+        }
         let name = active.item.name.file_name();
         self.outgoing_result(false, format!("{name} não foi enviado. {reason}"));
     }
 
+    /// A newer copy or the end of the session: the clipboard image still on its way is
+    /// dropped, queued, announced (its ticket stops working) or sending ("unavailable").
+    pub(crate) fn drop_clipboard_push(&mut self) {
+        self.outbox.queue.retain(|item| {
+            if item.clipboard.is_some() {
+                item.discard();
+            }
+            item.clipboard.is_none()
+        });
+        let clipboard_active = self
+            .outbox
+            .active
+            .as_ref()
+            .is_some_and(|a| a.item.clipboard.is_some());
+        if clipboard_active {
+            if let Some(OutActive {
+                phase: Phase::Sending { abort, .. },
+                ..
+            }) = &self.outbox.active
+            {
+                abort.by_user.store(true, Ordering::Release);
+            }
+            self.abort_outgoing("");
+        }
+    }
+
+    /// Queues a clipboard image ahead of the files that wait, replacing an older one.
+    pub(crate) fn enqueue_clipboard(
+        &mut self,
+        item: OutItem,
+        events: &tokio::sync::broadcast::Sender<Outgoing>,
+    ) {
+        self.drop_clipboard_push();
+        self.outbox.queue.push_front(item);
+        self.pump_outgoing(events);
+    }
+
     /// Offers the next file when a files.v2 phone is connected and nothing is in flight.
-    fn pump_outgoing(&mut self, events: &tokio::sync::broadcast::Sender<Outgoing>) {
+    pub(crate) fn pump_outgoing(&mut self, events: &tokio::sync::broadcast::Sender<Outgoing>) {
         if self.outbox.active.is_some() || !self.files_v2 {
             return;
         }
@@ -145,12 +214,20 @@ impl Runtime {
         if !self.session_ok(device, self.connection_epoch) {
             return;
         }
-        let Some(item) = self.outbox.queue.pop_front() else {
-            return;
+        let item = loop {
+            let Some(item) = self.outbox.queue.pop_front() else {
+                return;
+            };
+            // Only clipboard.v2 sessions understand the `clipboard` field.
+            if item.clipboard.is_some() && !self.clipboard_image {
+                item.discard();
+                continue;
+            }
+            break item;
         };
         let mut secret = [0u8; 32];
         rand::RngCore::fill_bytes(&mut rand::rng(), &mut secret);
-        let message = serde_json::json!({
+        let mut message = serde_json::json!({
             "v": 1,
             "type": "file.push",
             "transferId": item.id,
@@ -159,6 +236,10 @@ impl Runtime {
             "mime": files::mime_for(&item.name),
             "ticket": hex::encode(secret),
         });
+        if let Some(clip) = item.clipboard {
+            message["clipboard"] =
+                serde_json::json!({"revision": clip.revision, "automatic": clip.automatic});
+        }
         self.outbox.active = Some(OutActive {
             item,
             device,
@@ -227,6 +308,7 @@ impl Core {
                 path,
                 name,
                 size,
+                clipboard: None,
             });
         }
         s.pump_outgoing(&self.events);
@@ -292,6 +374,7 @@ impl Core {
             name: active.item.name.file_name(),
             size: active.item.size,
             abort,
+            clipboard: active.item.clipboard.is_some(),
         })
     }
 
@@ -322,6 +405,14 @@ impl Core {
         let mut s = self.state.lock().unwrap();
         if s.outbox.owns(&fetched.abort) {
             let active = s.outbox.active.take().unwrap();
+            if let Some(clip) = active.item.clipboard {
+                active.item.discard();
+                if outcome.is_ok() {
+                    s.record_image(TransferDirection::ToPhone, active.item.size, clip.automatic);
+                }
+                s.pump_outgoing(&self.events);
+                return;
+            }
             let name = active.item.name.file_name();
             match outcome {
                 Ok(_) => {
@@ -349,9 +440,16 @@ impl Core {
         }
     }
 
-    /// "Cancelar" in the panel.
+    /// "Cancelar" in the panel; a clipboard image is not shown there and is left alone.
     pub fn cancel_outgoing(&self) {
         let mut s = self.state.lock().unwrap();
+        if s.outbox
+            .active
+            .as_ref()
+            .is_some_and(|a| a.item.clipboard.is_some())
+        {
+            return;
+        }
         if let Some(OutActive {
             phase: Phase::Sending { abort, .. },
             ..
@@ -368,7 +466,8 @@ impl Core {
     }
 
     pub fn clear_outgoing(&self) {
-        self.state.lock().unwrap().outbox.queue.clear();
+        let mut s = self.state.lock().unwrap();
+        s.outbox.queue.retain(|item| item.clipboard.is_some());
     }
 }
 

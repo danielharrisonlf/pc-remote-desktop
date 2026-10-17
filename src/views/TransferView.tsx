@@ -6,7 +6,7 @@ import { useToast } from '../hooks/useToasts';
 import { cx } from '../lib/cx';
 import { formatBytes, formatClock, plural } from '../lib/format';
 import { errorMessage, type DesktopStatus, type FileEntry, type Settings, type TransferEntry } from '../types';
-import { clipboardSummary, fileProgress, inputSummary, sendSummary } from './summaries';
+import { clipboardSummary, fileProgress, inputSummary, sendSummary, transferMeta } from './summaries';
 import type { RunAction, ViewProps } from './viewProps';
 
 function SyncFlow({ settings }: { settings: Settings }) {
@@ -46,9 +46,7 @@ function TransferRow({ entry }: { entry: TransferEntry }) {
       </span>
       <span className="transfer-text">
         <span className="transfer-title">{toPhone ? 'Enviado ao celular' : 'Recebido do celular'}</span>
-        <span className="transfer-meta tabular">
-          {plural(entry.characters, 'caractere', 'caracteres')}, {entry.automatic ? 'automático' : 'manual'}
-        </span>
+        <span className="transfer-meta tabular">{transferMeta(entry)}</span>
       </span>
       <time className="transfer-time tabular" dateTime={new Date(entry.at).toISOString()}>
         {formatClock(entry.at, true)}
@@ -118,10 +116,10 @@ export function InputControls({ status, settings, run, isBusy }: Pick<ViewProps,
     return (
       <div className="kill-switch">
         <div>
-          <p className="kill-title">Mouse e teclado bloqueados</p>
-          <p className="muted">O celular só volta a controlar o PC depois de liberar.</p>
+          <p className="kill-title">Mouse, teclado e energia bloqueados</p>
+          <p className="muted">O celular só volta a controlar o PC, inclusive desligar e suspender, depois de liberar.</p>
         </div>
-        <Button variant="primary" icon={LockKeyholeOpen} loading={isBusy('unblockInput')} onClick={() => void run('unblockInput', desktopApi.unblockInput, 'Mouse e teclado liberados.')}>
+        <Button variant="primary" icon={LockKeyholeOpen} loading={isBusy('unblockInput')} onClick={() => void run('unblockInput', desktopApi.unblockInput, 'Controle pelo celular liberado.')}>
           Liberar
         </Button>
       </div>
@@ -130,10 +128,10 @@ export function InputControls({ status, settings, run, isBusy }: Pick<ViewProps,
   return (
     <div className="kill-switch">
       <div>
-        <p className="kill-title">{status.inputActive ? 'Interromper controle' : 'Bloquear mouse e teclado'}</p>
-        <p className="muted">Fica bloqueado até você liberar. Também no ícone da bandeja.</p>
+        <p className="kill-title">{status.inputActive ? 'Interromper controle' : 'Bloquear controle pelo celular'}</p>
+        <p className="muted">Bloqueia mouse, teclado e energia (desligar, suspender) até você liberar e cancela o que estiver agendado. Também no ícone da bandeja.</p>
       </div>
-      <Button variant={status.inputActive ? 'danger' : 'secondary'} icon={Hand} loading={isBusy('stopInput')} onClick={() => void run('stopInput', desktopApi.stopInput, 'Mouse e teclado bloqueados.')}>
+      <Button variant={status.inputActive ? 'danger' : 'secondary'} icon={Hand} loading={isBusy('stopInput')} onClick={() => void run('stopInput', desktopApi.stopInput, 'Mouse, teclado e energia bloqueados.')}>
         {status.inputActive ? 'Interromper' : 'Bloquear'}
       </Button>
     </div>
@@ -238,7 +236,7 @@ export function TransferView({ status, settings, changeSettings, run, isBusy }: 
           ) : (
             <p className="muted subsection-empty">Nenhuma cópia ainda.</p>
           )}
-          <p className="card-footnote">O texto copiado não é salvo. Senhas de gerenciadores não são enviadas.</p>
+          <p className="card-footnote">O texto e as imagens copiados não são salvos. Senhas de gerenciadores não são enviadas.</p>
         </div>
       </section>
 
@@ -253,6 +251,7 @@ export function TransferView({ status, settings, changeSettings, run, isBusy }: 
         <ul className="notes">
           <li>Cliques e texto vão para a janela em foco.</li>
           <li>Apps abertos como administrador e a tela de bloqueio podem não responder.</li>
+          <li>Interromper também impede o celular de bloquear, suspender, desligar ou reiniciar o PC.</li>
         </ul>
       </section>
     </div>

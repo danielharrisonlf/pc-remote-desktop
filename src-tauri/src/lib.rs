@@ -1,8 +1,10 @@
 mod audio;
+mod clip_images;
 mod clipboard;
 mod connection;
 mod core;
 mod dialog;
+mod energy;
 mod external;
 mod files;
 mod input;
@@ -16,6 +18,7 @@ mod settings;
 mod system;
 /// Public for the integration tests in tests/updater.rs.
 pub mod update;
+mod wic;
 
 use crate::core::{Core, Pairing, Status};
 use std::{sync::Arc, time::Duration};
@@ -84,6 +87,11 @@ fn cancel_outgoing(core: tauri::State<'_, Arc<Core>>) {
 fn clear_outgoing(core: tauri::State<'_, Arc<Core>>) {
     core.clear_outgoing();
 }
+/// "Cancelar" of the action a phone scheduled (power.v1).
+#[tauri::command]
+fn cancel_power(core: tauri::State<'_, Arc<Core>>) {
+    core.power_cancel();
+}
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     external::open(&url)
@@ -95,6 +103,8 @@ fn open_received_folder(core: tauri::State<'_, Arc<Core>>) -> Result<(), String>
         .map_err(|error| format!("Não foi possível abrir Downloads\\PC Remote: {error}"))?;
     external::open_folder(&folder)
 }
+
+const CANCEL_POWER_IDLE: &str = "Cancelar ação agendada";
 
 pub fn run() {
     connection::install_crypto_provider();
@@ -120,6 +130,7 @@ pub fn run() {
             send_files_dialog,
             cancel_outgoing,
             clear_outgoing,
+            cancel_power,
             open_url,
             open_received_folder,
             update::update_check,
@@ -143,22 +154,15 @@ pub fn run() {
                     .body(body)
                     .show();
             }));
+            // The real Windows side; tests install their own and never touch it.
+            core.set_power_system(Box::new(energy::Windows));
+            core.set_image_writer(Box::new(clipboard::write_image_checked));
+            core.clean_clipboard_folder();
             let server = core.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = connection::serve(server.clone(), tls).await {
                     server.set_service_running(false);
                     server.diagnostic(&format!("Servidor local: {e}"));
-                }
-            });
-            let poll = core.clone();
-            tauri::async_runtime::spawn(async move {
-                let mut tick = tokio::time::interval(Duration::from_millis(650));
-                loop {
-                    tick.tick().await;
-                    poll.check_resume();
-                    poll.outgoing_tick();
-                    let core = poll.clone();
-                    let _ = tokio::task::spawn_blocking(move || core.refresh()).await;
                 }
             });
             let (tx, rx) = std::sync::mpsc::channel();
@@ -182,11 +186,16 @@ pub fn run() {
             let stop_input_item = MenuItem::with_id(
                 app,
                 "stop_input",
-                "Interromper mouse e teclado",
+                "Interromper mouse, teclado e energia",
                 true,
                 None::<&str>,
             )?;
-            let menu = Menu::with_items(app, &[&show, &pause, &stop_input_item, &quit])?;
+            let cancel_power_item =
+                MenuItem::with_id(app, "cancel_power", CANCEL_POWER_IDLE, false, None::<&str>)?;
+            let menu = Menu::with_items(
+                app,
+                &[&show, &pause, &stop_input_item, &cancel_power_item, &quit],
+            )?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
@@ -206,10 +215,34 @@ pub fn run() {
                     "stop_input" => {
                         let _ = app.state::<Arc<Core>>().stop_input();
                     }
+                    "cancel_power" => {
+                        app.state::<Arc<Core>>().power_cancel();
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
                 .build(app)?;
+            let poll = app.state::<Arc<Core>>().inner().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut tick = tokio::time::interval(Duration::from_millis(650));
+                let mut shown: Option<String> = None;
+                loop {
+                    tick.tick().await;
+                    poll.check_resume();
+                    poll.outgoing_tick();
+                    poll.power_tick();
+                    // The tray item says what is scheduled and is enabled only then.
+                    let label = poll.power_label();
+                    if label != shown {
+                        let _ = cancel_power_item
+                            .set_text(label.as_deref().unwrap_or(CANCEL_POWER_IDLE));
+                        let _ = cancel_power_item.set_enabled(label.is_some());
+                        shown = label;
+                    }
+                    let core = poll.clone();
+                    let _ = tokio::task::spawn_blocking(move || core.refresh()).await;
+                }
+            });
             Ok(())
         })
         .on_window_event(|window, event| match event {
