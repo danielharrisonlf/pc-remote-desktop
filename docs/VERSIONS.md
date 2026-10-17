@@ -4,7 +4,7 @@ Os lockfiles são a referência exata de todas as dependências transitivas. As 
 
 | Componente | Versão |
 |---|---|
-| Desktop / Android / protocolo | 0.6.0 / 0.6.0-kotlin / 1 + extensões opcionais input.v1, files.v1, files.v2, search.v1 e info.v1 |
+| Desktop / Android / protocolo | 0.6.1 / 0.6.1-kotlin / 1 + extensões opcionais input.v1, files.v1, files.v2, search.v1, info.v1, power.v1 e clipboard.v2 |
 | Node / npm | 24.21.0 / 11.19.0 |
 | Rust / MSVC / Windows SDK de build | 1.97.1 / 19.44 / 10.0.26100.0 |
 | Tauri Rust / CLI / API JS | 2.12.3 / 2.12.2 / 2.12.3 |
@@ -29,6 +29,9 @@ Target Android 36: o acesso LAN usa INTERNET e NSD. Ao elevar target para 37, im
 
 | Android | Desktop | Compatibilidade |
 |---|---|---|
+| 0.6.1-kotlin | 0.6.1 | Protocolo 1 + input.v1, files.v1, files.v2, search.v1, info.v1, power.v1 e clipboard.v2: tudo da 0.6.0, mais bloquear, suspender, desligar e reiniciar o PC (agora ou agendado) e imagens na área de transferência nos dois sentidos |
+| 0.6.1-kotlin | 0.6.0 | O PC ignora power.v1 e clipboard.v2: sem energia do PC e clipboard só com texto; vários PCs e controles de mídia fora do app funcionam |
+| 0.6.0-kotlin | 0.6.1 | Formato 0.6.0, sem campos novos |
 | 0.6.0-kotlin | 0.6.0 | Protocolo 1 + input.v1, files.v1, files.v2, search.v1 e info.v1: arquivos de qualquer tipo até 1 GB nos dois sentidos, touchpad e clipboard prontos após o pareamento, pesquisa no YouTube e nome do Windows |
 | 0.6.0-kotlin | 0.4.0 e 0.5.0 | O PC ignora files.v2, search.v1 e info.v1: PNG/JPG/PDF até 50 MB só do celular para o PC, sem pesquisa; touchpad pede **Ativar touchpad** e o PC ainda pede as chaves de mouse/teclado, arquivos e direções do clipboard |
 | 0.4.0 e 0.5.0-kotlin | 0.6.0 | Formato anterior; arquivos e mouse/teclado já liberados no PC; o clipboard sincroniza nas direções ligadas no celular |
