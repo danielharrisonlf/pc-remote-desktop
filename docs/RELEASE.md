@@ -1,4 +1,12 @@
-# Publicar uma versão do Windows
+# Publicar uma versão
+
+## Distribuição Ubuntu
+
+O guia [UBUNTU.md](UBUNTU.md) descreve a geração dos instaladores e a validação do mesmo `.deb` nas três versões LTS. A primeira distribuição usa a tag `v0.6.4-ubuntu.1`, mantendo a versão 0.6.4 embutida nos pacotes já validados. Publique `.deb`, `.tar.gz`, `install-ubuntu.sh` e `UBUNTU-SHA256SUMS-0.6.4.txt` com as [notas Ubuntu](releases/0.6.4-ubuntu.1.md).
+
+Releases específicas de Ubuntu devem ser publicadas com `--latest=false`: o endpoint `/releases/latest/download/latest.json` atende o atualizador Windows e precisa continuar apontando para uma release com seu manifesto assinado. Esta distribuição Ubuntu também usa `--prerelease`, pois a validação em uma sessão GNOME Wayland real permanece pendente. A tag deve apontar para o commit publicado com estas alterações; nunca mova a tag Windows existente para anexar código novo.
+
+## Distribuição Windows
 
 A partir da 0.5.0 o PC Remote se atualiza sozinho: lê `latest.json` da release mais recente, baixa o instalador em segundo plano, confere a assinatura e, quando o usuário clica em **Reiniciar para atualizar**, roda o instalador em modo passivo e abre de novo. Para isso cada release precisa ser assinada com a chave do atualizador e publicar quatro arquivos. Este documento descreve o processo completo.
 

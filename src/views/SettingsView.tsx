@@ -1,4 +1,6 @@
 import { CircleArrowUp, Download, Monitor, Moon, PanelLeft, Power, RefreshCw, RotateCw, Sun } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { desktopApi } from '../api';
 import { Button } from '../components/Button';
 import { Segmented } from '../components/Segmented';
 import { SettingSwitch } from '../components/Switch';
@@ -34,6 +36,30 @@ export function SettingsView({
   const { state } = updater;
   const status = updateStatus(state, now);
   const busy = isBusy(state);
+  const [wayland, setWayland] = useState(false);
+  const [controlReady, setControlReady] = useState(false);
+  const [authorizing, setAuthorizing] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    const refresh = () => {
+      void desktopApi.linuxInputStatus().then(([required, ready]) => {
+        if (mounted) { setWayland(required); setControlReady(ready); }
+      }).catch(() => {});
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 3000);
+    return () => { mounted = false; window.clearInterval(timer); };
+  }, []);
+  const authorizeControl = async () => {
+    setAuthorizing(true);
+    try {
+      await desktopApi.authorizeLinuxInput();
+      const [, ready] = await desktopApi.linuxInputStatus();
+      setControlReady(ready);
+      if (ready) toast.success('Controle autorizado pelo Ubuntu.');
+    } catch (reason) { toast.error(errorMessage(reason)); }
+    finally { setAuthorizing(false); }
+  };
 
   // The card already shows a found update; a manual check only confirms the other outcomes.
   const checkNow = () => {
@@ -88,13 +114,31 @@ export function SettingsView({
         <div className="setting-list">
           <SettingSwitch
             icon={Power}
-            label="Iniciar com o Windows"
+            label="Iniciar com o sistema"
             checked={settings.autostart}
             onChange={autostart => changeSettings({ autostart })}
           />
         </div>
         <p className="card-footnote">Fechar a janela mantém o PC Remote na bandeja. Para sair, use Encerrar no ícone da bandeja.</p>
       </section>
+
+      {wayland && (
+        <section className="card" aria-labelledby="ubuntu-control-title">
+          <header className="card-header">
+            <h2 id="ubuntu-control-title" className="card-title">Controle no Ubuntu</h2>
+          </header>
+          <p className="card-description">
+            Autorize mouse e teclado na janela do sistema para controlar aplicativos pelo celular.
+            O Ubuntu pode pedir essa permissão novamente ao reabrir o PC Remote.
+          </p>
+          <p role="status">{controlReady ? 'Controle autorizado.' : 'Aguardando autorização no computador.'}</p>
+          <div className="button-row">
+            <Button variant="primary" loading={authorizing} disabled={controlReady} onClick={() => void authorizeControl()}>
+              Autorizar controle
+            </Button>
+          </div>
+        </section>
+      )}
 
       <section className="card" aria-labelledby="updates-title">
         <header className="card-header">

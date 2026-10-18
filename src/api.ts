@@ -11,6 +11,8 @@ export const desktopApi = {
   /** Disarms mouse and keyboard and blocks them and power actions until `unblockInput`; drops a schedule. */
   stopInput: () => invoke<void>('stop_input'),
   unblockInput: () => invoke<void>('unblock_input'),
+  linuxInputStatus: () => invoke<[boolean, boolean]>('linux_input_status'),
+  authorizeLinuxInput: () => invoke<void>('authorize_linux_input'),
   /** Native picker; queues the chosen files for the phone and resolves to one message per file left out. */
   sendFilesDialog: () => invoke<string[]>('send_files_dialog'),
   cancelOutgoing: () => invoke<void>('cancel_outgoing'),

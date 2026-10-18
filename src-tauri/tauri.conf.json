@@ -46,7 +46,13 @@
         "depends": [
           "libwebkit2gtk-4.1-0",
           "libxdo3",
-          "libayatana-appindicator3-1"
+          "libayatana-appindicator3-1",
+          "pulseaudio-utils",
+          "zenity",
+          "xdg-utils",
+          "xdg-desktop-portal",
+          "xdg-desktop-portal-gnome | xdg-desktop-portal-kde",
+          "xwayland"
         ],
         "section": "utils",
         "priority": "optional"

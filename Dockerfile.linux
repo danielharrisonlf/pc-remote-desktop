@@ -1,4 +1,5 @@
-FROM ubuntu:22.04 AS linux-system-dependencies
+ARG UBUNTU_VERSION=22.04
+FROM ubuntu:${UBUNTU_VERSION} AS linux-system-dependencies
 
 ENV DEBIAN_FRONTEND=noninteractive
 

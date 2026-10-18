@@ -1,7 +1,7 @@
-//! Linux input simulation (`InputBackend`) for Ubuntu 22.04 / 24.04 LTS.
+//! Linux input simulation (`InputBackend`) for Ubuntu 22.04 / 24.04 / 26.04 LTS.
 //!
-//! Prioritizes direct X11 / XWayland simulation via `x11rb` (XTEST extension) and falls back
-//! gracefully to `xdotool` (`libxdo`), `ydotool`, or `wtype` on Wayland without ever panicking.
+//! Uses the consented RemoteDesktop portal on Wayland and XTEST on X11.
+use super::portal::{self, Event};
 use crate::{
     platform::{InputBackend, PlatformError},
     protocol::{DeckAction, KeyboardKey, PointerButton, PresentationCommand},
@@ -194,6 +194,9 @@ fn run_cmd(program: &str, args: &[&str]) -> bool {
 
 impl InputBackend for LinuxInput {
     fn move_pointer(&self, dx: i16, dy: i16) -> Result<(), PlatformError> {
+        if portal::is_wayland() {
+            return portal::send(Event::Motion(dx, dy));
+        }
         let x11_res = with_x11(|conn, _| {
             conn.xtest_fake_input(MOTION_NOTIFY_EVENT, 1, 0, x11rb::NONE, dx, dy, 0)
                 .map_err(|e| e.to_string())?;
@@ -219,6 +222,15 @@ impl InputBackend for LinuxInput {
     }
 
     fn click_pointer(&self, button: PointerButton, count: u8) -> Result<(), PlatformError> {
+        if portal::is_wayland() {
+            return portal::send(Event::Button(
+                match button {
+                    PointerButton::Left => 272,
+                    PointerButton::Right => 273,
+                },
+                count,
+            ));
+        }
         let btn = x11_button(button);
         let x11_res = with_x11(|conn, _| {
             for _ in 0..count {
@@ -247,6 +259,9 @@ impl InputBackend for LinuxInput {
     }
 
     fn scroll_pointer(&self, steps: i8) -> Result<(), PlatformError> {
+        if portal::is_wayland() {
+            return portal::send(Event::Scroll(steps));
+        }
         if steps == 0 {
             return Ok(());
         }
@@ -278,6 +293,9 @@ impl InputBackend for LinuxInput {
     }
 
     fn key_down(&self, key: KeyboardKey) -> Result<(), PlatformError> {
+        if portal::is_wayland() {
+            return portal::send(Event::Key(keysym_for(key), true));
+        }
         let sym = keysym_for(key);
         let x11_res = with_x11(|conn, _| {
             let (kc, _) = resolve_keycode(conn, sym)?;
@@ -298,6 +316,9 @@ impl InputBackend for LinuxInput {
     }
 
     fn key_up(&self, key: KeyboardKey) -> Result<(), PlatformError> {
+        if portal::is_wayland() {
+            return portal::send(Event::Key(keysym_for(key), false));
+        }
         let sym = keysym_for(key);
         let x11_res = with_x11(|conn, _| {
             let (kc, scratch) = resolve_keycode(conn, sym)?;
@@ -320,6 +341,9 @@ impl InputBackend for LinuxInput {
     }
 
     fn press_key(&self, key: KeyboardKey) -> Result<(), PlatformError> {
+        if portal::is_wayland() {
+            return portal::send(Event::Chord(vec![], keysym_for(key)));
+        }
         let sym = keysym_for(key);
         let x11_res = with_x11(|conn, _| {
             let (kc, scratch) = resolve_keycode(conn, sym)?;
@@ -348,6 +372,9 @@ impl InputBackend for LinuxInput {
     fn type_unicode(&self, text: &str) -> Result<(), PlatformError> {
         if text.is_empty() {
             return Err(PlatformError::InvalidMessage);
+        }
+        if portal::is_wayland() {
+            return portal::send(Event::Text(text.to_owned()));
         }
 
         let x11_res = with_x11(|conn, _| {
@@ -464,6 +491,9 @@ fn press_keysym_chord(
     main_sym: u32,
     xdotool_chord: &str,
 ) -> Result<(), PlatformError> {
+    if portal::is_wayland() {
+        return portal::send(Event::Chord(modifiers.to_vec(), main_sym));
+    }
     let x11_res = with_x11(|conn, _| {
         let mut mod_kcs = Vec::with_capacity(modifiers.len());
         for &mod_sym in modifiers {

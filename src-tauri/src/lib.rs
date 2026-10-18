@@ -65,6 +65,31 @@ fn stop_input(core: tauri::State<'_, Arc<Core>>) -> Result<(), String> {
 fn unblock_input(core: tauri::State<'_, Arc<Core>>) -> Result<(), String> {
     core.unblock_input()
 }
+
+#[tauri::command]
+fn linux_input_status() -> (bool, bool) {
+    #[cfg(target_os = "linux")]
+    {
+        return (
+            platform::linux::portal::is_wayland(),
+            platform::linux::portal::authorized(),
+        );
+    }
+    #[cfg(not(target_os = "linux"))]
+    (false, false)
+}
+
+#[tauri::command]
+async fn authorize_linux_input() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        return tauri::async_runtime::spawn_blocking(platform::linux::portal::prepare)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(target_os = "linux"))]
+    Ok(())
+}
 /// Opens the native picker and queues the chosen files; returns one message per file left out.
 #[tauri::command]
 async fn send_files_dialog(
@@ -125,6 +150,8 @@ pub fn run() {
             update_settings,
             stop_input,
             unblock_input,
+            linux_input_status,
+            authorize_linux_input,
             send_files_dialog,
             cancel_outgoing,
             clear_outgoing,

@@ -51,6 +51,11 @@ if [[ ${1:-} == --runtime ]]; then
     2>&1 | tee "$evidence/linux-runtime-tests.log"
   test_rc=${PIPESTATUS[0]}
 
+  PC_REMOTE_PORTAL_TEST=1 XDG_SESSION_TYPE=wayland \
+    cargo test --manifest-path "$workspace/src-tauri/Cargo.toml" --test wayland_portal --locked -- --ignored --nocapture \
+    2>&1 | tee "$evidence/wayland-portal-tests.log"
+  portal_rc=${PIPESTATUS[0]}
+
   app_rc=0
   if [[ ! -x $binary ]]; then
     echo "Expected Linux application binary missing: $binary" | tee -a "$evidence/runtime-summary.txt"
@@ -100,12 +105,12 @@ if [[ ${1:-} == --runtime ]]; then
     wait "$app_pid" 2>/dev/null || true
   fi
 
-  if [[ $test_rc -ne 0 || $app_rc -ne 0 ]]; then
-    printf 'runtime_tests_exit=%s\ntauri_smoke_exit=%s\n' "$test_rc" "$app_rc" \
+  if [[ $test_rc -ne 0 || $portal_rc -ne 0 || $app_rc -ne 0 ]]; then
+    printf 'runtime_tests_exit=%s\nwayland_portal_exit=%s\ntauri_smoke_exit=%s\n' "$test_rc" "$portal_rc" "$app_rc" \
       | tee -a "$evidence/runtime-summary.txt"
     exit 1
   fi
-  printf 'runtime_tests_exit=0\ntauri_smoke_exit=0\n' | tee -a "$evidence/runtime-summary.txt"
+  printf 'runtime_tests_exit=0\nwayland_portal_exit=0\ntauri_smoke_exit=0\n' | tee -a "$evidence/runtime-summary.txt"
   exit 0
 fi
 
@@ -148,13 +153,16 @@ if [[ $npm_test_rc -ne 0 ]]; then
   exit "$npm_test_rc"
 fi
 
-npm --prefix "$workspace" run tauri -- build --no-bundle \
+npm --prefix "$workspace" run build:ubuntu \
   2>&1 | tee "$evidence/tauri-build.log"
 build_rc=${PIPESTATUS[0]}
 if [[ $build_rc -ne 0 ]]; then
   echo "Tauri Linux build failed: $build_rc" | tee "$evidence/build-summary.txt"
   exit "$build_rc"
 fi
+
+cp "$workspace"/release-assets/*/ubuntu-*/*.deb "$evidence/"
+cp "$workspace"/release-assets/*/pc-remote-ubuntu-*.tar.gz "$evidence/"
 
 if [[ ! -x $binary ]]; then
   echo "Tauri build succeeded but binary is missing: $binary" | tee "$evidence/build-summary.txt"

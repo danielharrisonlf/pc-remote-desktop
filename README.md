@@ -17,6 +17,18 @@ Esta é uma versão de avaliação: APK assinado com chave debug e instalador se
 
 A versão 0.2.1 prioriza no QR o endereço IPv4 de uma interface com rota padrão, evitando escolher primeiro um adaptador virtual sem rota padrão. Mantém os demais endereços e o preenchimento manual. VPNs ou múltiplas rotas padrão ainda podem exigir informar o IPv4 alcançável pelo celular; a seleção não garante conectividade com todas as redes.
 
+## Instalar no Ubuntu 22.04, 24.04 e 26.04 LTS
+
+Use o pacote `.deb`, sem compilar nem instalar ferramentas de desenvolvimento:
+
+```bash
+sudo apt install --no-install-recommends ~/Downloads/pc-remote-desktop-0.6.4-amd64.deb
+```
+
+Baixe o [.deb amd64](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.4-ubuntu.1/pc-remote-desktop-0.6.4-amd64.deb) ou o [instalador compactado](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.4-ubuntu.1/pc-remote-ubuntu-0.6.4-amd64.tar.gz) da [pré-release Ubuntu](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.4-ubuntu.1). O pacote instala as dependências e adiciona **PC Remote** ao menu. O instalador compactado também permite extrair e executar `bash install-ubuntu.sh`. Instalação e abertura foram verificadas nas três versões LTS; a validação em um desktop GNOME Wayland real permanece pendente.
+
+No Wayland, inclusive no Ubuntu Desktop 26.04, abra **Configurações → Controle no Ubuntu → Autorizar controle** e permita mouse e teclado na janela do sistema. Para atualizar, encerre o aplicativo e instale o novo `.deb`; os pareamentos são mantidos. Veja [o guia do Ubuntu](docs/UBUNTU.md) para instalação, autorização e geração dos pacotes.
+
 ## Desenvolvimento e instalação
 
 Windows 10 1809+ ou Windows 11, WebView2 Runtime, Node LTS >=22.12, Rust estável **MSVC x64**, Visual Studio Build Tools com Desktop Development with C++ e Windows SDK. O aplicativo usa a sessão do usuário; não precisa ser iniciado como administrador. MinGW não é o toolchain suportado para distribuir Tauri.
@@ -41,7 +53,7 @@ npm run tauri build -- --target x86_64-pc-windows-msvc
 
 O instalador fica em `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/` (ou `target/release/bundle/` sem target explícito). A build assina o instalador para o atualizador e exige `TAURI_SIGNING_PRIVATE_KEY`; sem a chave, [RELEASE.md](docs/RELEASE.md) mostra como gerar um instalador só para teste. Instale o pacote NSIS `.exe` na sessão do usuário. Fechar a janela oculta o painel e mantém os serviços Rust; use **Encerrar** na bandeja para sair. Inicialização com Windows é configurável no painel. As versões exatas estão em `package-lock.json` e `src-tauri/Cargo.lock`; consulte também [VERSIONS.md](docs/VERSIONS.md).
 
-### Compilação e empacotamento no Linux (Ubuntu 22.04 / 24.04 LTS)
+### Compilação e empacotamento no Linux (Ubuntu 22.04 / 24.04 / 26.04 LTS)
 
 Instale os pacotes de sistema necessários para compilar o Tauri v2 e os backends de entrada, bandeja e WebKitGTK no Ubuntu / Debian:
 
@@ -49,6 +61,7 @@ Instale os pacotes de sistema necessários para compilar o Tauri v2 e os backend
 sudo apt-get update && sudo apt-get install -y \
   libwebkit2gtk-4.1-dev \
   build-essential \
+  pkg-config \
   curl \
   wget \
   file \
@@ -58,15 +71,13 @@ sudo apt-get update && sudo apt-get install -y \
   librsvg2-dev
 ```
 
-Em seguida, instale as dependências Node e gere os pacotes `.deb` e `AppImage`:
+Com Node e Rust instalados, gere o `.deb` e o instalador compactado. Para distribuição nas três versões LTS, compile no Ubuntu 22.04:
 
 ```bash
-npm ci
-cargo test --manifest-path src-tauri/Cargo.toml
-npm run tauri build -- --bundles deb,appimage
+npm run build:ubuntu
 ```
 
-Os pacotes gerados ficam em `src-tauri/target/release/bundle/deb/` e `src-tauri/target/release/bundle/appimage/`. No Linux, o início automático cria/remove `~/.config/autostart/pc-remote-desktop.desktop` seguindo o padrão XDG.
+O `.deb`, o script de instalação, instruções e hashes ficam em `release-assets/<versão>/ubuntu-amd64/`; o `.tar.gz` fica em `release-assets/<versão>/`. Não é necessária a chave de assinatura do atualizador Windows. No Linux, o início automático cria/remove `~/.config/autostart/pc-remote-desktop.desktop` seguindo o padrão XDG.
 
 ## Parear e usar
 

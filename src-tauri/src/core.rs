@@ -550,6 +550,10 @@ impl Core {
         blocked: bool,
         save: impl FnOnce(&Settings) -> Result<(), String>,
     ) -> Result<(), String> {
+        #[cfg(target_os = "linux")]
+        if blocked {
+            crate::platform::linux::portal::interrupt();
+        }
         let mut s = self.state.lock().unwrap();
         let mut next = s.settings.clone();
         next.input_blocked = blocked;
@@ -565,6 +569,10 @@ impl Core {
             s.power_schedule = None;
         }
         s.settings = next;
+        #[cfg(target_os = "linux")]
+        if !blocked {
+            crate::platform::linux::portal::resume();
+        }
         s.revision += 1;
         self.publish_state_locked(&s);
         saved.map_err(|error| {
