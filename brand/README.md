@@ -1,8 +1,8 @@
-# PC Remote / Linked frame
+# PC Remote / Precision Nexus
 
-The open monitor frame and chamfered phone share a single geometric silhouette.
+A floating display horizon and fluid handheld remote share a minimalist, clean geometric silhouette.
 Ice (`#F8FAFC`) identifies the computer; cyan (`#00E5FF`) identifies the remote
-controller. Obsidian (`#0F141C`) provides the neutral surface. No gradients,
+controller and wireless pulse. Obsidian (`#0F141C`) provides the neutral surface. No gradients,
 shadows, fonts, or external artwork are used in the mark.
 
 `symbol.svg` is the canonical, unmasked 108 × 108 vector. Filled paths, rather
