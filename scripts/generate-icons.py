@@ -17,7 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 import resvg_py
 
 ROOT = Path(__file__).resolve().parents[1]
-BG = "#0F141C"
+BG = "#F1F5F9"
 NS = "http://www.w3.org/2000/svg"
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
 ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
@@ -30,18 +30,34 @@ def paths() -> list[dict[str, str]]:
 
 def svg(*, background: str | None = None, zoom: bool = False,
         monochrome: bool = False, round_icon: bool = False) -> str:
+    defs = (
+        '  <defs>\n'
+        '    <linearGradient id="pcr-bg" x1="0%" y1="0%" x2="0%" y2="100%">\n'
+        '      <stop offset="0%" stop-color="#FFFFFF"/>\n'
+        '      <stop offset="100%" stop-color="#F1F5F9"/>\n'
+        '    </linearGradient>\n'
+        '    <linearGradient id="pcr-cyan-accent" x1="0%" y1="0%" x2="100%" y2="100%">\n'
+        '      <stop offset="0%" stop-color="#00E5FF"/>\n'
+        '      <stop offset="100%" stop-color="#0284C7"/>\n'
+        '    </linearGradient>\n'
+        '    <filter id="pcr-elevation" x="-10%" y="-10%" width="120%" height="125%" filterUnits="userSpaceOnUse">\n'
+        '      <feDropShadow dx="0" dy="2.5" stdDeviation="3" flood-color="#0F172A" flood-opacity="0.06"/>\n'
+        '      <feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#0F172A" flood-opacity="0.04"/>\n'
+        '    </filter>\n'
+        '  </defs>\n'
+    )
     backdrop = ""
     if background:
-        backdrop = (f'<circle cx="54" cy="54" r="54" fill="{background}"/>' if round_icon else
-                    f'<rect width="108" height="108" rx="22" fill="{background}"/>')
+        backdrop = (f'  <circle cx="54" cy="54" r="50" fill="url(#pcr-bg)" stroke="#E2E8F0" stroke-width="1.2"/>\n' if round_icon else
+                    f'  <rect x="4" y="4" width="100" height="100" rx="24" fill="url(#pcr-bg)" filter="url(#pcr-elevation)" stroke="#E2E8F0" stroke-width="1.2"/>\n')
     content = ""
     for path in paths():
         attrs = path | ({"fill": "#FFFFFF"} if monochrome else {})
-        content += "<path " + " ".join(f'{key}="{value}"' for key, value in attrs.items()) + "/>"
+        content += "  <path " + " ".join(f'{key}="{value}"' for key, value in attrs.items()) + "/>\n"
     if zoom:
-        content = '<g transform="translate(-18 -18) scale(1.333333333333)">' + content + "</g>"
-    return (f'<svg xmlns="{NS}" width="108" height="108" viewBox="0 0 108 108">'
-            '<title>PC Remote</title>' + backdrop + content + "</svg>\n")
+        content = '  <g transform="translate(-9.53 -9.53) scale(1.176470588235)">\n' + content + "  </g>\n"
+    return (f'<svg xmlns="{NS}" width="108" height="108" viewBox="0 0 108 108">\n'
+            f'<title>PC Remote</title>\n{defs}{backdrop}{content}</svg>\n')
 
 
 def render(source: str, size: int) -> bytes:
@@ -58,6 +74,8 @@ def vector(*, monochrome: bool = False, notification: bool = False) -> bytes:
                      'android:pivotX="54" android:pivotY="54">')
     for path in paths():
         color = "#FFFFFF" if monochrome else path["fill"]
+        if color.startswith("url"):
+            color = "#0284C7"
         rule = ' android:fillType="evenOdd"' if path.get("fill-rule") else ""
         lines.append(f'  <path android:fillColor="{color}"{rule} android:pathData="{path["d"]}"/>')
     if notification:
@@ -83,8 +101,8 @@ def preview(source: str) -> bytes:
     font = ImageFont.load_default(size=20)
     small = ImageFont.load_default(size=15)
     title = ImageFont.load_default(size=34)
-    draw.text((48, 32), "PC Remote / Linked frame", fill="#F8FAFC", font=title)
-    draw.text((48, 83), "Obsidian 0F141C   /   Ice F8FAFC   /   Signal 00E5FF", fill="#A8B4C4", font=font)
+    draw.text((48, 32), "PC Remote / Precision Dual Prism", fill="#F8FAFC", font=title)
+    draw.text((48, 83), "Porcelain F1F5F9   /   Slate 0F172A   /   Cyan-Blue 00E5FF-0284C7", fill="#A8B4C4", font=font)
     master = Image.open(io.BytesIO(render(source, 340))).convert("RGBA")
     board.paste(master, (64, 147), master)
     draw.text((64, 510), "DESKTOP MASTER", fill="#A8B4C4", font=small)
@@ -102,7 +120,7 @@ def preview(source: str) -> bytes:
     crop = full.crop((50, 50, 250, 250)).resize((180, 180), Image.Resampling.LANCZOS)
     mono = Image.open(io.BytesIO(render(svg(monochrome=True), 300))).convert("RGBA")
     mono.putdata([(188, 218, 240, p[3]) for p in mono.get_flattened_data()])
-    themed = Image.alpha_composite(Image.new("RGBA", (300, 300), "#263B4A"), mono)
+    themed = Image.alpha_composite(Image.new("RGBA", (300, 300), "#1E293B"), mono)
     themed = themed.crop((50, 50, 250, 250)).resize((180, 180), Image.Resampling.LANCZOS)
     for index, radius in enumerate((90, 56, 36, 90)):
         mask = Image.new("L", (720, 720))
