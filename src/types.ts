@@ -1,6 +1,13 @@
 // Mirrors the serde output of `core::Status` in src-tauri/src/core.rs.
 // Keep field names and optionality in sync with the Rust structs.
 
+export interface NetworkAccessStatus {
+  supported: boolean;
+  state: 'configured' | 'restricted' | 'unknown' | 'cancelled';
+  message: string;
+  profile: string | null;
+}
+
 export interface PairingSession {
   code: string;
   /** Unix milliseconds. */

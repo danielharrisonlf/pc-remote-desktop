@@ -10,6 +10,7 @@ import { Button } from './Button';
 import { Dialog } from './Dialog';
 import { PendingRequest } from './DeviceItems';
 import { FingerprintStrip } from './Fingerprint';
+import { NetworkAccessPanel } from './NetworkAccessPanel';
 
 /** Matches `Duration::from_secs(120)` in src-tauri/src/pairing.rs. */
 const PAIRING_WINDOW_MS = 120_000;
@@ -194,6 +195,7 @@ function PairingContent({ status, run, isBusy, onDone }: { status: DesktopStatus
           {active ? 'Novo código' : 'Gerar código'}
         </Button>
       </div>
+      {status.pending.length === 0 ? <NetworkAccessPanel compact /> : null}
     </div>
   );
 }

@@ -2,6 +2,14 @@
 
 O código contém integrações nativas reais. Testes unitários não comprovam compatibilidade de cada player, permissões do Android nem continuidade durante suspensão. Este registro distingue execução automatizada, execução no Windows deste ambiente e validações pendentes em Android físico.
 
+## Atualização 0.6.7 — diagnóstico e reparo de permissões de rede, 24/10/2026
+
+- `cargo test --target x86_64-pc-windows-msvc`: **117 passaram**, zero falhas, sete ignorados. Cobertura de diagnóstico de firewall, plano de reparo desativando bloqueios locais de prompt e configurando regras para sub-rede local, preservação de regras de Group Policy e integridade de nomes.
+- Frontend: **45 testes Vitest passaram**; `tsc --noEmit` aprovado. Integração de `NetworkAccessPanel` na gaveta de pareamento e na visão de diagnóstico (`DiagnosticsView`).
+- Build Windows x64 de produção assinada e instalador NSIS 0.6.7 gerados: **4642522 bytes**, SHA-256 `0a624bc3b3d9a72883b3dd75bd5f08e81cbac1538a154fff5ab0baf2630fb992`.
+- `release:updater` gerou `latest.json`, `.sig` e `WINDOWS-SHA256SUMS-0.6.7.txt` assinados pela chave privada do atualizador.
+- `cargo test --target x86_64-pc-windows-msvc --test updater -- real_release_artifacts_verify_with_the_configured_key --include-ignored`: passou com os artefatos reais da release 0.6.7.
+
 ## Correção 0.6.6 — pareamento e descoberta, 24/10/2026
 
 - `cargo +stable-x86_64-pc-windows-msvc test --manifest-path src-tauri/Cargo.toml --lib`: **112 passaram**, zero falhas, sete ignorados. Cobre código incorreto sem consumir convite, pedido válido sobrevivendo à expiração do código, expiração do pedido, recusa, regeneração, prazo da autorização, persistência falhando e autorizações concorrentes. O teste TLS inclui código incorreto seguido de pareamento válido.

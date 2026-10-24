@@ -1,9 +1,11 @@
 import { invoke, type Channel } from '@tauri-apps/api/core';
-import type { DesktopStatus, DownloadEvent, PairingSession, Settings, UpdateInfo } from './types';
+import type { DesktopStatus, DownloadEvent, NetworkAccessStatus, PairingSession, Settings, UpdateInfo } from './types';
 
 /** Typed wrappers for the commands registered in src-tauri/src/lib.rs. */
 export const desktopApi = {
   getStatus: () => invoke<DesktopStatus>('get_status'),
+  networkAccessStatus: () => invoke<NetworkAccessStatus>('network_access_status'),
+  repairNetworkAccess: () => invoke<NetworkAccessStatus>('repair_network_access'),
   startPairing: () => invoke<PairingSession>('start_pairing'),
   approvePairing: (id: string, approved: boolean) => invoke<void>('approve_pairing', { id, approved }),
   revokeDevice: (id: string) => invoke<void>('revoke_device', { id }),

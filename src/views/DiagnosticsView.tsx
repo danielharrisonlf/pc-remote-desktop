@@ -1,13 +1,15 @@
 import { ClipboardCopy, LockKeyhole, RefreshCw, ShieldCheck } from 'lucide-react';
+import { useState } from 'react';
 import { Button } from '../components/Button';
 import { CopyButton } from '../components/CopyButton';
 import { EmptyState } from '../components/EmptyState';
 import { FingerprintPanel } from '../components/Fingerprint';
+import { NetworkAccessPanel } from '../components/NetworkAccessPanel';
 import { useToast } from '../hooks/useToasts';
 import { copyText } from '../lib/clipboard';
 import { formatClock, plural } from '../lib/format';
 import { powerSummary } from './summaries';
-import { errorMessage, PROTOCOL_VERSION, preferredAddress, type DesktopStatus } from '../types';
+import { errorMessage, PROTOCOL_VERSION, preferredAddress, type DesktopStatus, type NetworkAccessStatus } from '../types';
 import type { ViewProps } from './viewProps';
 
 interface DiagnosticsViewProps extends ViewProps {
@@ -16,7 +18,7 @@ interface DiagnosticsViewProps extends ViewProps {
 }
 
 /** Plain-text report for support. Contains no tokens, clipboard text or typed input. */
-export function buildReport(status: DesktopStatus, appVersion: string, serviceLabel: string): string {
+export function buildReport(status: DesktopStatus, appVersion: string, serviceLabel: string, networkAccess?: NetworkAccessStatus | null): string {
   const lines = [
     'PC Remote — relatório de diagnóstico',
     `Gerado em: ${new Date().toISOString()}`,
@@ -26,6 +28,11 @@ export function buildReport(status: DesktopStatus, appVersion: string, serviceLa
     `Computador: ${status.pcName}`,
     `Endereços: ${status.addresses.join(', ') || 'nenhum'}`,
     `Porta: ${status.port}`,
+    ...(networkAccess?.supported ? [
+      `Permissões de rede: ${networkAccess.state}`,
+      `Perfil de rede: ${networkAccess.profile || 'indisponível'}`,
+      `Verificação de rede: ${networkAccess.message}`,
+    ] : []),
     `Identidade SHA-256: ${status.fingerprint || 'indisponível'}`,
     `Celulares pareados: ${status.devices.length} (${status.devices.filter(device => device.connected).length} conectado)`,
     `Pedidos pendentes: ${status.pending.length}`,
@@ -45,12 +52,13 @@ export function buildReport(status: DesktopStatus, appVersion: string, serviceLa
 
 export function DiagnosticsView({ status, serviceState, appVersion, refresh }: DiagnosticsViewProps) {
   const toast = useToast();
+  const [networkAccess, setNetworkAccess] = useState<NetworkAccessStatus | null>(null);
   const address = preferredAddress(status.addresses);
   const serviceLabel = serviceState === 'unavailable' ? 'Indisponível' : status.serviceRunning ? 'Em execução' : 'Parado';
   const events = [...status.diagnostics].reverse();
 
   const copyReport = () => {
-    copyText(buildReport(status, appVersion, serviceLabel))
+    copyText(buildReport(status, appVersion, serviceLabel, networkAccess))
       .then(() => toast.success('Relatório copiado.'))
       .catch(reason => toast.error(errorMessage(reason)));
   };
@@ -118,6 +126,8 @@ export function DiagnosticsView({ status, serviceState, appVersion, refresh }: D
           </div>
         </dl>
       </section>
+
+      <NetworkAccessPanel card onStatus={setNetworkAccess} />
 
       <section className="card" aria-labelledby="events-title">
         <header className="card-header">

@@ -901,3 +901,20 @@ dialog::backdrop {
   border: 0;
   border-top: 1px solid var(--border);
 }
+
+.network-access {
+  display: grid;
+  gap: 12px;
+}
+
+.network-access.is-compact {
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+
+.network-access-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}

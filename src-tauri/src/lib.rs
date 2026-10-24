@@ -9,6 +9,7 @@ mod external;
 mod files;
 mod input;
 mod media;
+mod network_access;
 mod outbox;
 mod pairing;
 #[cfg(test)]
@@ -154,6 +155,8 @@ pub fn run() {
             unblock_input,
             linux_input_status,
             authorize_linux_input,
+            network_access::network_access_status,
+            network_access::repair_network_access,
             send_files_dialog,
             cancel_outgoing,
             clear_outgoing,
