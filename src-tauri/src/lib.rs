@@ -24,6 +24,11 @@ mod system;
 pub mod update;
 mod wic;
 
+/// Handles the fixed installer-only command-line action before the Tauri app starts.
+pub fn configure_network_for_installer() -> i32 {
+    network_access::configure_network_for_installer()
+}
+
 use crate::core::{Core, Pairing, Status};
 use std::{sync::Arc, time::Duration};
 use tauri::{

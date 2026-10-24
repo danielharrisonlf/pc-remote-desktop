@@ -4,7 +4,7 @@ Os lockfiles são a referência exata de todas as dependências transitivas. As 
 
 | Componente | Versão |
 |---|---|
-| Desktop / Android / protocolo | 0.6.7 / 0.6.9-kotlin / 1 + extensões opcionais input.v1, files.v1, files.v2, search.v1, info.v1, power.v1, clipboard.v2, wol.v1, numpad.v1, presentation.v1 e deck.v1 |
+| Desktop / Android / protocolo | 0.6.8 / 0.6.9-kotlin / 1 + extensões opcionais input.v1, files.v1, files.v2, search.v1, info.v1, power.v1, clipboard.v2, wol.v1, numpad.v1, presentation.v1 e deck.v1 |
 | Node / npm | 24.21.0 / 11.19.0 |
 | Rust / MSVC / Windows SDK de build | 1.97.1 / 19.44 / 10.0.26100.0 |
 | Tauri Rust / CLI / API JS | 2.12.3 / 2.12.2 / 2.12.3 |

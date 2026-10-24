@@ -90,9 +90,15 @@ Uma release sem `latest.json` deixa o app sem atualização (ele informa "Nenhum
 
 ## O que acontece no PC do usuário
 
+Desde a 0.6.8, o hook `src-tauri/windows/network-hooks.nsh` executa o modo interno `--configure-network` depois da cópia dos arquivos, tanto na instalação quanto na atualização `/UPDATE`. Esse modo é tratado antes do Tauri e do serviço de rede; ele compartilha a rotina do botão de reparo e resolve internamente o caminho do executável. O Windows solicita UAC quando a configuração exige elevação.
+
+Os códigos de saída são 0 para permissões efetivas verificadas, 2 para cancelamento do UAC e 3 para restrição ou falha de verificação. Cancelamento ou falha mantêm o aplicativo instalado e orientam a repetir o reparo pelo painel. O hook aguarda a conclusão antes da abertura normal do app. A integração usa o hook pós-instalação documentado pelo [Tauri](https://v2.tauri.app/distribute/windows-installer/#extending-the-installer).
+
+`powershell -File scripts/test-network-installer.ps1` compila o hook real com um executável de teste inofensivo e verifica instalação, atualização, cancelamento, restrição e helper ausente. Esse teste não executa UAC nem altera o firewall; a rotina de permissões tem testes próprios de planejamento e execução no PowerShell com APIs de rede substituídas em memória.
+
 1. O app verifica 10 s depois de abrir e depois no intervalo escolhido (1 h, 6 h ou 24 h; padrão 6 h; **Manual** só verifica pelo botão). Uma verificação que falhou é repetida em 15 min.
 2. Com **Baixar atualizações automaticamente** (padrão), o Rust baixa o instalador e confere a assinatura e a versão assinada antes de guardá-lo em memória. O painel mostra o progresso e depois **Reiniciar para atualizar**; o cabeçalho mostra **Atualização pronta**. Sem essa opção, o botão é **Baixar e instalar**.
-3. Ao reiniciar, o Rust grava o instalador em `%TEMP%`, inicia `setup.exe /P /UPDATE /R` e encerra o processo (o ícone da bandeja é removido antes). O NSIS em `/UPDATE` pula a página "já instalado", fecha pelo Restart Manager uma instância que ainda esteja aberta, instala por usuário sem UAC e abre o app de novo. Configurações, pareamentos e identidade em `%APPDATA%\PC Remote` são mantidos.
+3. Ao reiniciar, o Rust grava o instalador em `%TEMP%`, inicia `setup.exe /P /UPDATE /R` e encerra o processo (o ícone da bandeja é removido antes). O NSIS em `/UPDATE` pula a página "já instalado", fecha pelo Restart Manager uma instância que ainda esteja aberta e instala por usuário. A etapa de permissões solicita UAC se precisar configurar o firewall; depois o app abre de novo. Configurações, pareamentos e identidade em `%APPDATA%\PC Remote` são mantidos.
 
 A versão 0.4.0 e anteriores não têm atualizador: a 0.5.0 é instalada manualmente uma vez, por cima da instalação existente (na página do NSIS, mantenha a opção padrão e não marque a exclusão dos dados do aplicativo).
 

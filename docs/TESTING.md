@@ -2,6 +2,19 @@
 
 O código contém integrações nativas reais. Testes unitários não comprovam compatibilidade de cada player, permissões do Android nem continuidade durante suspensão. Este registro distingue execução automatizada, execução no Windows deste ambiente e validações pendentes em Android físico.
 
+## Atualização 0.6.8 — permissões na instalação e atualização, 24/10/2026
+
+- Rust/MSVC `cargo test --lib`: **122 passaram**, zero falhas, sete smokes de hardware ignorados. Os dez testes de permissões incluem execução real do PowerShell com substitutos estritos em memória para NetSecurity: criação, repetição, escopo, falha intermediária mantendo a regra desabilitada, identidade conflitante e preservação de regras administrativas/políticas.
+- O launcher executou um payload Unicode maior que o limite de linha de comando do Windows via stdin. Corrigidos o comando elevado excedendo esse limite, a identificação por regex, os parâmetros dos filtros e o despacho do modo de instalação antes do Tauri. Caminho com apóstrofo e acentos coberto no PowerShell.
+- `scripts/test-network-installer.ps1`: **cinco cenários passaram**, compilando o hook NSIS real e um helper inofensivo: instalação, `/UPDATE /R`, cancelamento, restrição e helper ausente. A instalação concluiu em todos, com chamada única quando o helper existia e sem deixar o indicador de erro do NSIS ativo.
+- Frontend: **45 testes Vitest passaram**. Revisão independente do candidato Rust, UI, NSIS e transporte Android: nenhum defeito material restante.
+- TypeScript, Vite e build de produção Windows x64 concluídos. Hook incluído no NSIS final. Instalador: **4642372 bytes**, SHA-256 `599f104e78fbe75e9879157b847cbf32d1ea88a1a8771488853af7376d7591a2`; assinatura e versão assinada 0.6.8 verificadas por `release:updater`.
+- Atualizador com os artefatos 0.6.8 reais (`PCREMOTE_UPDATER_E2E_DIR`, `cargo test --test updater -- --include-ignored --nocapture`): **seis passaram**, incluindo download e verificação do instalador, recusa de bytes adulterados e de manifesto com versão rebatizada. Não executa o instalador.
+- O executável release com `--configure-network --invalid-test-argument` retornou 3 antes de inicializar o app ou pedir elevação. Uma tentativa adicional de rodar o teste Vitest do empacotador pelo runner Node falhou por runner incorreto; o comando correto passou nos sete testes (já incluídos nos 45), com ambos os logs preservados.
+- QA Android 0.6.9 com transporte Rust/TLS real: a versão 0.6.8 não enviou pedido quando o primeiro IP recusou; a 0.6.9 pareou pelo segundo IP, reconectou após encerrar o processo e após instalar o APK release exato. Rodada completa forçada: **176 testes JUnit passaram**, zero falhas; assemble e lint das duas variantes passaram. Evidências locais em `../artifacts/qa/connection-fallback/20261024-172507/README.md`.
+- UAC real, alteração do firewall e instalação sobre a conta pessoal não foram executados nesta rodada. A causa física da recusa no outro computador e descoberta multicast em celular físico continuam sem confirmação. Os testes do helper não alteraram permissões reais deste PC.
+- O worker do helper encerrou sem testes após falhas de execução; o integrador concluiu as correções e a verificação, com revisão independente. Semantica indisponível; evidência registrada no repositório e nos logs locais `artifacts/release-0.6.8/`.
+
 ## Atualização 0.6.7 — diagnóstico e reparo de permissões de rede, 24/10/2026
 
 - `cargo test --target x86_64-pc-windows-msvc`: **117 passaram**, zero falhas, sete ignorados. Cobertura de diagnóstico de firewall, plano de reparo desativando bloqueios locais de prompt e configurando regras para sub-rede local, preservação de regras de Group Policy e integridade de nomes.

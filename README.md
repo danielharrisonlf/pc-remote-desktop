@@ -1,19 +1,21 @@
 # PC Remote Desktop
 
-Controle local do Windows e Linux (Ubuntu) pelo Android, sem conta ou nuvem. Este é o repositório desktop independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.6.7, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md), [validação](docs/TESTING.md) e [como publicar uma versão](docs/RELEASE.md).
+Controle local do Windows e Linux (Ubuntu) pelo Android, sem conta ou nuvem. Este é o repositório desktop independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.6.8, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md), [validação](docs/TESTING.md) e [como publicar uma versão](docs/RELEASE.md).
 
-## Baixar e instalar — Windows 0.6.7
+## Baixar e instalar — Windows 0.6.8
 
 | Aplicativo | Download |
 |---|---|
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.7/pc-remote-desktop-0.6.7-x64-setup.exe) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.8/pc-remote-desktop-0.6.8-x64-setup.exe) |
 | Android — APK universal | [Baixar APK 0.6.9](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.9-kotlin/pc-remote-android-kotlin-0.6.9-evaluation.apk) |
 
-As Releases dos dois repositórios são públicas. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.7) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.9-kotlin) também incluem os hashes SHA-256.
+As Releases dos dois repositórios são públicas. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.8) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.9-kotlin) também incluem os hashes SHA-256.
 
-Instale o `.exe` no Windows e abra o PC Remote pela bandeja. **Quem usa a 0.5.0, 0.6.0, 0.6.1, 0.6.2, 0.6.3, 0.6.4, 0.6.5 ou 0.6.6 recebe a 0.6.7 pelo próprio app** (veja [Atualizações](#atualizações)); quem usa a 0.4.0 ou anterior instala manualmente uma vez, por cima da instalação atual (mantenha a opção padrão da página do instalador e não marque a exclusão dos dados). Pareamentos e configurações são mantidos. No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
+Instale o `.exe` no Windows e abra o PC Remote pela bandeja. **Quem usa a 0.5.0, 0.6.0, 0.6.1, 0.6.2, 0.6.3, 0.6.4, 0.6.5, 0.6.6 ou 0.6.7 recebe a 0.6.8 pelo próprio app** (veja [Atualizações](#atualizações)); quem usa a 0.4.0 ou anterior instala manualmente uma vez, por cima da instalação atual (mantenha a opção padrão da página do instalador e não marque a exclusão dos dados). Pareamentos e configurações são mantidos. No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
 
 Esta é uma versão de avaliação: APK assinado com chave debug e instalador sem Authenticode. A validação em celular físico e players reais permanece pendente; consulte [testes e limitações](docs/TESTING.md).
+
+Atualização **0.6.8**: a instalação e a atualização solicitam ao Windows a configuração das permissões de rede do PC Remote. O pedido de administrador aparece quando necessário; cancelar mantém o app instalado e permite tentar novamente em **Parear celular → Permitir conexões na rede**. Veja as [notas da versão](docs/releases/0.6.8.md).
 
 Atualização **0.6.7**: verificação e reparo de permissões de rede no Firewall do Windows diretamente pelo painel e pela gaveta de pareamento, e inclusão de permissões no relatório de diagnóstico. Use também o Android 0.6.9-kotlin. Veja as [notas da versão](docs/releases/0.6.7.md).
 
@@ -95,12 +97,9 @@ Se a rede bloquear a descoberta (mDNS), use o QR ou **Informar endereço** no An
 
 ## Firewall
 
-Permita TCP 43127 de entrada para o executável somente no perfil **Privado** e na sub-rede local. Descoberta mDNS usa UDP 5353. Rede de convidados, isolamento de clientes Wi-Fi e algumas VPNs impedem conexão/descoberta. O aplicativo não modifica o roteador nem abre portas na internet. Caso o Windows apresente diálogo de firewall, autorize apenas a rede privada. Uma regra explícita criada pelo administrador pode usar o caminho real instalado:
+A instalação e a atualização verificam o acesso à rede e pedem autorização de administrador do Windows quando é preciso configurar as regras. Elas são limitadas ao executável instalado: TCP 43127 para conexão e UDP 5353 para descoberta mDNS, com origem na sub-rede local, nos perfis Privado e Público. A configuração efetiva é conferida depois do reparo.
 
-```powershell
-# Opcional: PowerShell administrativo, ajuste o caminho para o executável instalado.
-New-NetFirewallRule -DisplayName 'PC Remote LAN' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 43127 -Profile Private -RemoteAddress LocalSubnet -Program 'C:\caminho\pc-remote-desktop.exe'
-```
+Se cancelar a autorização, o app continua instalado. Repita em **Parear celular → Permitir conexões na rede** ou em **Diagnóstico**. Regras administrativas e políticas corporativas podem exigir intervenção do administrador da rede. Rede de convidados, isolamento de clientes Wi-Fi e algumas VPNs também podem impedir o acesso entre os aparelhos.
 
 ## Privacidade e assinatura
 
