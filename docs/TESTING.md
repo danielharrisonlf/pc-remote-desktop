@@ -2,6 +2,29 @@
 
 O código contém integrações nativas reais. Testes unitários não comprovam compatibilidade de cada player, permissões do Android nem continuidade durante suspensão. Este registro distingue execução automatizada, execução no Windows deste ambiente e validações pendentes em Android físico.
 
+## Correção 0.6.6 — pareamento e descoberta, 24/10/2026
+
+- `cargo +stable-x86_64-pc-windows-msvc test --manifest-path src-tauri/Cargo.toml --lib`: **112 passaram**, zero falhas, sete ignorados. Cobre código incorreto sem consumir convite, pedido válido sobrevivendo à expiração do código, expiração do pedido, recusa, regeneração, prazo da autorização, persistência falhando e autorizações concorrentes. O teste TLS inclui código incorreto seguido de pareamento válido.
+- Frontend: **45 testes Vitest passaram**; TypeScript e build de produção passaram. A interface só considera sucesso quando o dispositivo aprovado está conectado; reabrir o painel não regenera o convite de um pedido em andamento.
+- Build Windows x64 de produção e instalador NSIS 0.6.6 gerados. Instalador: **4601608 bytes**, SHA-256 `4d694956b6dd0cdcd42562edc453e1cf0bc015fc9d142240b5702b7429973950`. `release:updater` verificou a assinatura e a versão assinada com a chave pública configurada.
+- `cargo test --test updater -- --include-ignored --nocapture`, com `PCREMOTE_UPDATER_E2E_DIR` apontando aos artefatos 0.6.6: **seis passaram**, incluindo download do instalador real e recusa de cópia adulterada. Logs em `artifacts/release-0.6.6/` neste repositório.
+- Os arquivos Rust alterados passaram em `rustfmt --check` com `skip_children=true`. A checagem global ainda aponta formatação anterior em `src/platform/windows/input.rs`, sem relação com esta correção.
+- Revisão independente de Rust, TypeScript e Android: nenhum defeito material encontrado. O erro inicial de lint Android por chamada sem proteção de versão foi corrigido e as duas variantes passaram em lint; tentativas falhas foram preservadas.
+
+### Integração com Android 16/API 36
+
+AVD Ritual_Pixel em sessão somente leitura, APK Android 0.6.8/code608, dois servidores Rust com `Core::ephemeral` e o manipulador de conexão de produção (`connection::handle`), identidades e certificados diferentes. Os servidores escutam apenas em loopback; o Android acessa `10.0.2.2`. Entrada remota, sincronização de clipboard e autostart desativados no fixture.
+
+- Pareamento por código com A, aprovação local e autenticação: passou; encerrar e reabrir o app preservou o PC e reconectou.
+- Pareamento por código com B: passou; A e B aparecem no seletor. Trocar de B para A conectou A e desconectou B, preservando os dois pareamentos.
+- Código de B enviado a A: recusado como código incorreto, sem novo pedido ou credencial. Captura inicial tardia não comprova o aviso; a repetição foi registrada com hierarchy e captura no momento do erro.
+- Pedido aceito antes de vencer o convite, aprovação depois: passou com cliente Android real. O fixture expirou o prazo do convite e, em seguida, aprovou o pedido ainda dentro dos seus próprios 120 s; resultado `completed`, pedido removido e celular conectado. O vencimento foi controlado pelo fixture, sem esperar dois minutos no relógio.
+- APK release exato, SHA-256 `e67424b6778ad22932c019a646169ba0c8b64d32b4462041770ae6a2c5e2fd8d`, instalado por cima do debug sem limpar dados: preservou os dois PCs, reconectou B e alternou A → B com autenticação no servidor correto. O receiver de testes está ausente no manifesto release.
+- O navegador mDNS do Windows resolveu os dois UUIDs anunciados. Isso verifica anúncio e resolução no host; descoberta multicast no Android e dois PCs físicos em Wi-Fi continuam sem validação.
+- Recusa, expiração do próprio pedido e certificado divergente não foram repetidos no emulador nesta rodada; as regras de prazo/recusa estão cobertas nos testes Rust e a seleção de endereço preservando o certificado nos testes Android. Instalação do NSIS sobre a instalação pessoal e build Linux não foram executadas nesta rodada.
+
+Evidências fora dos repositórios: `../artifacts/qa/pairing-discovery/20261024/`, com logs de build, capturas, hierarquias e estados sem tokens ou chaves privadas. Fixture reproduzível em `src-tauri/src/pairing_fixture.rs` (teste ignorado `pairing_fixture::real_pairing_fixture`, diretório absoluto via `PCREMOTE_PAIRING_QA_DIR`, encerramento por arquivo `stop`). Semantica indisponível; o registro desta rodada fica nos arquivos e evidências locais.
+
 ## Atualização 0.6.2 — arquitetura multiplataforma (Windows + Linux/Ubuntu), 17/10/2026
 
 ### Testes automatizados

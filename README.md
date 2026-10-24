@@ -1,19 +1,21 @@
 # PC Remote Desktop
 
-Controle local do Windows e Linux (Ubuntu) pelo Android, sem conta ou nuvem. Este é o repositório desktop independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.6.5, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md), [validação](docs/TESTING.md) e [como publicar uma versão](docs/RELEASE.md).
+Controle local do Windows e Linux (Ubuntu) pelo Android, sem conta ou nuvem. Este é o repositório desktop independente; o aplicativo Android está em `pc-remote-android`. Aplicativo 0.6.6, protocolo 1. Consulte [contrato e compatibilidade](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [mídia](docs/MEDIA-COMPATIBILITY.md), [validação](docs/TESTING.md) e [como publicar uma versão](docs/RELEASE.md).
 
-## Baixar e instalar — Windows 0.6.5
+## Baixar e instalar — Windows 0.6.6
 
 | Aplicativo | Download |
 |---|---|
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.5/pc-remote-desktop-0.6.5-x64-setup.exe) |
-| Android — APK universal | [Baixar APK 0.6.6](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.6-kotlin/pc-remote-android-kotlin-0.6.6-evaluation.apk) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.6/pc-remote-desktop-0.6.6-x64-setup.exe) |
+| Android — APK universal | [Baixar APK 0.6.8](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.8-kotlin/pc-remote-android-kotlin-0.6.8-evaluation.apk) |
 
-As Releases dos dois repositórios são públicas. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.5) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.6-kotlin) também incluem os hashes SHA-256.
+As Releases dos dois repositórios são públicas. As páginas de [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.6) e [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.8-kotlin) também incluem os hashes SHA-256.
 
-Instale o `.exe` no Windows e abra o PC Remote pela bandeja. **Quem usa a 0.5.0, 0.6.0, 0.6.1, 0.6.2, 0.6.3 ou 0.6.4 recebe a 0.6.5 pelo próprio app** (veja [Atualizações](#atualizações)); quem usa a 0.4.0 ou anterior instala manualmente uma vez, por cima da instalação atual (mantenha a opção padrão da página do instalador e não marque a exclusão dos dados). Pareamentos e configurações são mantidos. No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
+Instale o `.exe` no Windows e abra o PC Remote pela bandeja. **Quem usa a 0.5.0, 0.6.0, 0.6.1, 0.6.2, 0.6.3, 0.6.4 ou 0.6.5 recebe a 0.6.6 pelo próprio app** (veja [Atualizações](#atualizações)); quem usa a 0.4.0 ou anterior instala manualmente uma vez, por cima da instalação atual (mantenha a opção padrão da página do instalador e não marque a exclusão dos dados). Pareamentos e configurações são mantidos. No celular, abra o APK pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte os dois à mesma rede local, clique em **Parear celular** no PC, digite no celular o código de 8 dígitos (ou leia o QR) e confirme o pedido no Windows. Nenhum dos dois precisa de ferramentas de desenvolvimento.
 
 Esta é uma versão de avaliação: APK assinado com chave debug e instalador sem Authenticode. A validação em celular físico e players reais permanece pendente; consulte [testes e limitações](docs/TESTING.md).
+
+Correção **0.6.6**: distingue código incorreto de convite expirado, conserva o prazo dos pedidos já recebidos e aguarda a conexão do celular para confirmar o pareamento. Use também o Android 0.6.8-kotlin. Veja as [notas da versão](docs/releases/0.6.6.md).
 
 A versão 0.2.1 prioriza no QR o endereço IPv4 de uma interface com rota padrão, evitando escolher primeiro um adaptador virtual sem rota padrão. Mantém os demais endereços e o preenchimento manual. VPNs ou múltiplas rotas padrão ainda podem exigir informar o IPv4 alcançável pelo celular; a seleção não garante conectividade com todas as redes.
 
@@ -83,11 +85,11 @@ O `.deb`, o script de instalação, instruções e hashes ficam em `release-asse
 
 1. Conecte os dois aparelhos à mesma LAN. Abra o painel na bandeja e inicie o pareamento.
 2. No Android, digite o código de 8 dígitos e escolha o PC encontrado na rede, ou leia o QR. Com o código, o celular mostra uma faixa de cores que deve ser igual à exibida no PC.
-3. Confirme o pedido e o nome do celular no Windows. O código expira em 120 segundos.
+3. Confirme o pedido, as cores de identidade e o nome do celular no Windows. O código aceita novos pedidos por 120 segundos; depois de recebido, o pedido tem mais 120 segundos para aprovação.
 4. Pronto: touchpad, volume, mídia, arquivos e área de transferência funcionam sem ligar nada. Volume e mídia seguem as capacidades reais de cada player; o celular controla primeiro o player que o Windows trata como atual e pode abrir pesquisas do YouTube no navegador padrão do PC. Para remover acesso, revogue o dispositivo no painel.
 5. A área de transferência sincroniza em tempo real nos dois sentidos. Com o celular 0.6.1-kotlin, imagens copiadas (um print, uma imagem do navegador) também vão e vêm, até 32 MB; quando a cópia tem texto e imagem, vai o texto. Para parar, desligue **Sincronização em tempo real** no painel, na bandeja ou no celular; enviar texto e arquivos continua manual.
 
-Se a rede bloquear a descoberta (mDNS), use o QR. A descoberta não prova identidade: no pareamento por código, compare as cores antes de permitir. Após reinstalar ou apagar a identidade do PC, remova o pareamento antigo e pareie novamente.
+Se a rede bloquear a descoberta (mDNS), use o QR ou **Informar endereço** no Android, com o endereço e a porta exibidos no PC. A descoberta não prova identidade: no pareamento por código, compare as cores antes de permitir. Após reinstalar ou apagar a identidade do PC, remova o pareamento antigo e pareie novamente.
 
 ## Firewall
 

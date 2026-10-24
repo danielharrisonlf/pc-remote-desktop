@@ -18,9 +18,19 @@ export interface Device {
 
 export interface PendingDevice {
   id: string;
+  deviceId: string;
   deviceName: string;
   /** Unix milliseconds. */
   requestedAt: number;
+  /** Deadline of this request, independent of the code's deadline. */
+  expiresAt: number;
+}
+
+export interface PairingResult {
+  requestId: string;
+  deviceId: string;
+  state: 'approved' | 'completed' | 'failed' | 'denied' | 'expired' | 'invalidated';
+  message: string | null;
 }
 
 /** Files and mouse/keyboard need no switch: they work after pairing. */
@@ -106,6 +116,7 @@ export interface DesktopStatus {
   pairing: PairingSession | null;
   devices: Device[];
   pending: PendingDevice[];
+  pairingResult?: PairingResult | null;
   settings: Settings;
   diagnostics: DiagnosticEntry[];
   /** Newest first. */

@@ -1,4 +1,4 @@
-pub use crate::pairing::{Pairing, Pending, PendingView};
+pub use crate::pairing::{Pairing, PairingResult, Pending, PendingView};
 use crate::{
     audio,
     clip_images::ImageWriter,
@@ -87,6 +87,8 @@ pub struct Status {
     pub pairing: Option<Pairing>,
     pub devices: Vec<DeviceView>,
     pub pending: Vec<PendingView>,
+    #[serde(rename = "pairingResult")]
+    pub pairing_result: Option<PairingResult>,
     pub settings: Settings,
     pub diagnostics: Vec<DiagnosticEntry>,
     pub transfers: Vec<TransferEntry>,
@@ -127,6 +129,7 @@ pub struct Runtime {
     pub pairing: Option<(Pairing, Instant)>,
     pub pair_generation: u64,
     pub pending: HashMap<Uuid, Pending>,
+    pub pairing_result: Option<PairingResult>,
     pub connected: Option<Uuid>,
     pub connection_epoch: u64,
     pub failed_pairs: VecDeque<Instant>,
@@ -311,6 +314,7 @@ impl Core {
                 pairing: None,
                 pair_generation: 0,
                 pending: HashMap::new(),
+                pairing_result: None,
                 connected: None,
                 connection_epoch: 0,
                 failed_pairs: VecDeque::new(),
@@ -384,12 +388,16 @@ impl Core {
             pending: s
                 .pending
                 .iter()
+                .filter(|(_, p)| p.deadline > Instant::now())
                 .map(|(id, p)| PendingView {
                     id: *id,
+                    device_id: p.device_id,
                     device_name: p.device_name.clone(),
                     requested_at: p.requested_at,
+                    expires_at: p.expires_at,
                 })
                 .collect(),
+            pairing_result: s.pairing_result.clone(),
             settings: s.settings.clone(),
             diagnostics: s.diagnostics.iter().cloned().collect(),
             transfers: s.transfers.iter().rev().cloned().collect(),
@@ -1128,14 +1136,14 @@ mod tests {
         let device = Uuid::new_v4();
         let code = core.start_pairing().code;
         let request = Uuid::new_v4();
-        let (rx, generation) = core
+        let rx = core
             .pair_request(request, device, "Android".into(), code)
             .unwrap();
         core.approve_pairing(request, true).unwrap();
-        assert!(rx.blocking_recv().unwrap());
-        let (_, token) = core
-            .pair_complete(device, "Android".into(), generation)
-            .unwrap();
+        let crate::pairing::ApprovalOutcome::Approved(grant) = rx.blocking_recv().unwrap() else {
+            panic!("approval expected")
+        };
+        let (_, token) = core.pair_complete(grant).unwrap();
         assert!(core
             .connect_authenticated(device, &token, Features::legacy(false, false))
             .is_ok());
@@ -1462,14 +1470,14 @@ mod tests {
         let core = test_core();
         let first = core.start_pairing();
         let id = Uuid::new_v4();
-        let (rx, generation) = core
+        let rx = core
             .pair_request(id, Uuid::new_v4(), "Phone".into(), first.code)
             .unwrap();
         core.start_pairing();
-        assert!(!rx.blocking_recv().unwrap());
-        assert!(core
-            .pair_complete(Uuid::new_v4(), "Phone".into(), generation)
-            .is_err());
+        assert!(matches!(
+            rx.blocking_recv().unwrap(),
+            crate::pairing::ApprovalOutcome::Invalidated
+        ));
     }
     #[test]
     fn clipboard_dedup_and_conflict() {

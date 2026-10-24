@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { ShieldCheck, ShieldX, Smartphone } from 'lucide-react';
-import { formatDay, formatRelative } from '../lib/format';
+import { formatCountdown, formatDay, formatRelative } from '../lib/format';
 import { cx } from '../lib/cx';
 import type { Device, PendingDevice } from '../types';
 import { Button } from './Button';
@@ -36,6 +36,8 @@ interface PendingRequestProps {
 
 /** Access request preview with the decision right next to it. */
 export function PendingRequest({ request, now, deciding, onDecide }: PendingRequestProps) {
+  const remaining = request.expiresAt - now;
+  const expired = remaining <= 0;
   return (
     <div className="request" role="group" aria-label={`Pedido de acesso de ${request.deviceName}`}>
       <span className="request-avatar" aria-hidden>
@@ -44,12 +46,13 @@ export function PendingRequest({ request, now, deciding, onDecide }: PendingRequ
       <div className="request-text">
         <p className="request-title">{request.deviceName}</p>
         <p className="request-meta">Pediu acesso {formatRelative(request.requestedAt, now)}</p>
+        <p className="request-meta">{expired ? 'Solicitação expirada' : `Responda em ${formatCountdown(remaining)}`}</p>
       </div>
       <div className="request-actions">
         <Button variant="danger-ghost" icon={ShieldX} disabled={deciding} onClick={() => onDecide(false)}>
           Recusar
         </Button>
-        <Button variant="primary" icon={ShieldCheck} loading={deciding} onClick={() => onDecide(true)}>
+        <Button variant="primary" icon={ShieldCheck} loading={deciding} disabled={expired} onClick={() => onDecide(true)}>
           Permitir
         </Button>
       </div>

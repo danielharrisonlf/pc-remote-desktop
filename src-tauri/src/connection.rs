@@ -3,10 +3,11 @@ use crate::{
     energy,
     files::{self, Accepted, FileKind},
     outbox::Fetched,
+    pairing::ApprovalOutcome,
     protocol::{self, Action, ClientMessage, DeclineCode, Features, FileClientMessage, Wording},
 };
 use futures_util::{SinkExt, StreamExt};
-use mdns_sd::{ServiceDaemon, ServiceInfo};
+use mdns_sd::{DaemonEvent, IfKind, ServiceDaemon, ServiceInfo};
 use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer},
     ServerConfig,
@@ -70,12 +71,15 @@ pub async fn serve(core: Arc<Core>, config: ServerConfig) -> Result<(), String> 
     let listener = TcpListener::bind(("0.0.0.0", protocol::PORT))
         .await
         .map_err(|e| e.to_string())?;
-    let mdns = ServiceDaemon::new().ok();
-    if mdns.is_none() {
-        core.diagnostic("Descoberta mDNS indisponível. Use o endereço manual.");
-    }
+    let mdns = match ServiceDaemon::new() {
+        Ok(daemon) => Some(daemon),
+        Err(_) => {
+            core.diagnostic("Descoberta mDNS indisponível. Use o endereço manual.");
+            None
+        }
+    };
     let status = core.status();
-    if let Ok(info) = ServiceInfo::new(
+    match ServiceInfo::new(
         "_pcremote._tcp.local.",
         &status.pc_name,
         &format!("{}.local.", status.pc_id),
@@ -83,9 +87,34 @@ pub async fn serve(core: Arc<Core>, config: ServerConfig) -> Result<(), String> 
         protocol::PORT,
         &[("id", status.pc_id.to_string().as_str()), ("v", "1")][..],
     ) {
-        if let Some(mdns) = &mdns {
-            let _ = mdns.register(info.enable_addr_auto());
+        Ok(info) => {
+            if let Some(mdns) = &mdns {
+                // The TLS listener is IPv4 only. Auto-addressing still follows IP changes.
+                if mdns.disable_interface(IfKind::IPv6).is_err() {
+                    core.diagnostic("Descoberta mDNS: não foi possível limitar o anúncio a IPv4.");
+                } else {
+                    match mdns.monitor() {
+                        Ok(events) => {
+                            let monitor_core = core.clone();
+                            std::thread::spawn(move || {
+                                while let Ok(event) = events.recv() {
+                                    if matches!(event, DaemonEvent::Error(_)) {
+                                        monitor_core.diagnostic(
+                                            "Descoberta mDNS: falha ao anunciar o serviço.",
+                                        );
+                                    }
+                                }
+                            });
+                        }
+                        Err(_) => core.diagnostic("Descoberta mDNS: monitor indisponível."),
+                    }
+                    if mdns.register(info.enable_addr_auto()).is_err() {
+                        core.diagnostic("Descoberta mDNS: falha ao registrar o serviço.");
+                    }
+                }
+            }
         }
+        Err(_) => core.diagnostic("Descoberta mDNS: serviço local inválido."),
     }
     let acceptor = TlsAcceptor::from(Arc::new(config));
     core.set_service_running(true);
@@ -152,7 +181,7 @@ fn file_socket_config() -> WebSocketConfig {
     config
 }
 
-async fn handle(
+pub(crate) async fn handle(
     core: Arc<Core>,
     tls: tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
 ) -> Result<(), String> {
@@ -245,25 +274,38 @@ async fn control(core: Arc<Core>, mut ws: ServerSocket, features: Features) -> R
                 match msg {
                     ClientMessage::PairRequest {device_id,device_name,code,..} if device.is_none()=>{
                         match core.pair_request(id,device_id,device_name.clone(),code){
-                            Ok((receiver,generation))=>{
+                            Ok(receiver)=>{
                                 first_valid_message=true;
                                 struct PendingCleanup {core:Arc<Core>,id:Uuid}
                                 impl Drop for PendingCleanup {fn drop(&mut self){self.core.cancel_pending(self.id);}}
                                 let _pending=PendingCleanup{core:core.clone(),id};
                                 send(&mut ws,json!({"v":1,"type":"pair.pending","id":id})).await?;
                                 let mut receiver=receiver;
-                                let deadline=tokio::time::Instant::now()+Duration::from_secs(120);
-                                let approved=loop {tokio::select!{
-                                    answer=&mut receiver=>break answer.unwrap_or(false),
-                                    _=tokio::time::sleep_until(deadline)=>break false,
+                                let mut deadline=core.expire_pending(id)
+                                    .map(tokio::time::Instant::from_std)
+                                    .unwrap_or_else(tokio::time::Instant::now);
+                                let outcome=loop {tokio::select!{
+                                    answer=&mut receiver=>break answer.unwrap_or(ApprovalOutcome::Invalidated),
+                                    _=tokio::time::sleep_until(deadline)=>{
+                                        deadline=core.expire_pending(id)
+                                            .map(tokio::time::Instant::from_std)
+                                            .unwrap_or_else(||tokio::time::Instant::now()+Duration::from_millis(10));
+                                    },
                                     incoming=ws.next()=>match incoming{
                                         Some(Ok(Message::Ping(payload)))=>ws.send(Message::Pong(payload)).await.map_err(|e|e.to_string())?,
                                         Some(Ok(Message::Pong(_)))=>{},
                                         _=>return Ok(())
                                     }
                                 }};
-                                if approved {match core.pair_complete(device_id,device_name,generation){Ok((pc_id,token))=>{let status=core.status();send(&mut ws,json!({"v":1,"type":"pair.result","id":id,"pcId":pc_id,"pcName":status.pc_name,"token":token})).await?},Err(code)=>error(&mut ws,id,&code).await?}}
-                                else {error(&mut ws,id,"pairing_denied").await?}
+                                match outcome {
+                                    ApprovalOutcome::Approved(grant) => match core.pair_complete(grant) {
+                                        Ok((pc_id,token))=>{let status=core.status();send(&mut ws,json!({"v":1,"type":"pair.result","id":id,"pcId":pc_id,"pcName":status.pc_name,"token":token})).await?},
+                                        Err(code)=>error(&mut ws,id,&code).await?,
+                                    },
+                                    ApprovalOutcome::Denied => error(&mut ws,id,"pairing_denied").await?,
+                                    ApprovalOutcome::Expired => error(&mut ws,id,"pairing_timeout").await?,
+                                    ApprovalOutcome::Invalidated => error(&mut ws,id,"pairing_invalidated").await?,
+                                }
                             },Err(code)=>error(&mut ws,id,code).await?
                         }
                     }
@@ -2115,6 +2157,19 @@ mod integration_tests {
         let device = Uuid::new_v4();
         let pair_id = Uuid::new_v4();
         let invitation = core.start_pairing();
+        let mut wrong_code = connect(port, &certificate_pem).await;
+        emit(
+            &mut wrong_code,
+            json!({"v":1,"type":"pair.request","id":Uuid::new_v4(),"deviceId":Uuid::new_v4(),"deviceName":"Wrong code test","code":"wrong-code"}),
+        )
+        .await;
+        assert_eq!(
+            receive(&mut wrong_code, "error").await["code"],
+            "pairing_code_incorrect"
+        );
+        assert!(core.status().pending.is_empty());
+        wrong_code.close(None).await.unwrap();
+
         let mut ws = connect(port, &certificate_pem).await;
         emit(&mut ws, json!({"v":1,"type":"pair.request","id":pair_id,"deviceId":device,"deviceName":"Integration test","code":invitation.code})).await;
         receive(&mut ws, "pair.pending").await;

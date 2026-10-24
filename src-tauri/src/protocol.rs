@@ -546,9 +546,7 @@ pub fn validate_action_for(action: &Action, negotiated: &Features) -> Result<(),
         {
             Err("invalid_message")
         }
-        Action::KeyboardKey { key } if key.is_numpad() && !negotiated.numpad => {
-            Err("unavailable")
-        }
+        Action::KeyboardKey { key } if key.is_numpad() && !negotiated.numpad => Err("unavailable"),
         Action::PresentationControl { .. } if !negotiated.presentation => Err("unavailable"),
         Action::DeckTrigger { .. } if !negotiated.deck => Err("unavailable"),
         Action::FileOffer {
@@ -732,8 +730,12 @@ pub fn error_text(code: &str, wording: Wording) -> (&'static str, bool) {
     match code {
         "version_mismatch" => ("Versão do protocolo incompatível", false),
         "unauthorized" => ("Dispositivo sem autorização", false),
-        "pairing_expired" => ("Código inválido ou expirado", false),
+        "pairing_code_incorrect" => ("Código incorreto para este PC", false),
+        "pairing_expired" => ("Código expirado. Gere outro no PC", false),
+        "pairing_timeout" => ("Solicitação de pareamento expirada", false),
+        "pairing_invalidated" => ("Solicitação substituída por um novo código", false),
         "pairing_denied" => ("Pareamento recusado no PC", false),
+        "pairing_failed" => ("Não foi possível salvar o pareamento no PC", true),
         "rate_limited" => ("Muitas tentativas. Tente depois.", true),
         "unavailable" => ("Ação indisponível neste dispositivo ou player", false),
         "conflict" => ("Houve outra cópia antes desta", false),
@@ -966,9 +968,8 @@ mod tests {
 
     #[test]
     fn wol_numpad_presentation_and_deck_require_negotiation() {
-        let negotiated = Features::parse([
-            b"input.v1, wol.v1, numpad.v1, presentation.v1, deck.v1".as_slice()
-        ]);
+        let negotiated =
+            Features::parse([b"input.v1, wol.v1, numpad.v1, presentation.v1, deck.v1".as_slice()]);
         assert!(
             negotiated.input
                 && negotiated.wol

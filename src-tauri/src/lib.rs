@@ -11,6 +11,8 @@ mod input;
 mod media;
 mod outbox;
 mod pairing;
+#[cfg(test)]
+mod pairing_fixture;
 pub mod platform;
 mod power;
 mod protocol;

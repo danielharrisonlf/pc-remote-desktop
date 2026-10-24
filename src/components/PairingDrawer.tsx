@@ -4,7 +4,8 @@ import { CircleCheck, Clock, LoaderCircle, RefreshCw } from 'lucide-react';
 import { desktopApi } from '../api';
 import { useNow } from '../hooks/useNow';
 import { formatCountdown, groupCode } from '../lib/format';
-import type { DesktopStatus } from '../types';
+import { pairingProgress, shouldStartPairing, type AwaitedPairing } from '../lib/pairing';
+import { preferredAddress, type DesktopStatus, type PendingDevice } from '../types';
 import { Button } from './Button';
 import { Dialog } from './Dialog';
 import { PendingRequest } from './DeviceItems';
@@ -37,16 +38,23 @@ function PairingContent({ status, run, isBusy, onDone }: { status: DesktopStatus
   const active = pairing !== null && pairing.expiresAt > now;
   const [qr, setQr] = useState<string | null>(null);
   const [authorized, setAuthorized] = useState<string | null>(null);
+  const [approval, setApproval] = useState<AwaitedPairing | null>(null);
   const autoStarted = useRef(false);
   const generating = isBusy('pair');
+  const completion = approval ? pairingProgress(status, approval, now) : null;
+  const address = preferredAddress(status.addresses);
 
   // Opening the drawer is the intent to pair: create a code right away unless a
   // valid one is still running (regenerating would invalidate a pending phone).
   useEffect(() => {
     if (autoStarted.current) return;
     autoStarted.current = true;
-    if (!status.pairing || status.pairing.expiresAt <= Date.now()) void run('pair', desktopApi.startPairing);
-  }, [run, status.pairing]);
+    if (shouldStartPairing(status, Date.now())) void run('pair', desktopApi.startPairing);
+  }, [run, status.pairing, status.pending.length, status.pairingResult?.state]);
+
+  useEffect(() => {
+    if (completion?.state === 'connected' && approval) setAuthorized(approval.name);
+  }, [completion?.state, approval]);
 
   useEffect(() => {
     if (!pairing?.qrPayload) {
@@ -62,22 +70,43 @@ function PairingContent({ status, run, isBusy, onDone }: { status: DesktopStatus
     };
   }, [pairing?.qrPayload]);
 
-  const decide = (id: string, name: string, approved: boolean) => {
-    void run(`decide:${id}`, () => desktopApi.approvePairing(id, approved), approved ? undefined : 'Pedido recusado.').then(ok => {
-      if (ok && approved) setAuthorized(name);
+  const decide = (request: PendingDevice, approved: boolean) => {
+    if (approved) setApproval({ requestId: request.id, deviceId: request.deviceId, name: request.deviceName, startedAt: Date.now() });
+    void run(`decide:${request.id}`, () => desktopApi.approvePairing(request.id, approved), approved ? undefined : 'Pedido recusado.').then(ok => {
+      if (!ok && approved) setApproval(null);
     });
   };
 
-  if (authorized) {
+  const pairedName = authorized ?? (completion?.state === 'connected' ? approval?.name : null);
+  if (pairedName) {
     return (
       <div className="pair-success">
         <span className="pair-success-icon" aria-hidden>
           <CircleCheck />
         </span>
-        <p className="pair-success-title">{authorized} pareado</p>
+        <p className="pair-success-title">{pairedName} pareado</p>
         <Button variant="primary" onClick={onDone}>
           Concluir
         </Button>
+      </div>
+    );
+  }
+
+  if (approval && completion?.state === 'waiting') {
+    return (
+      <div className="pair-success" role="status">
+        <LoaderCircle className="spin" aria-hidden />
+        <p className="pair-success-title">Concluindo pareamento</p>
+        <p className="muted">Acesso permitido a {approval.name}. Aguardando o celular conectar.</p>
+      </div>
+    );
+  }
+
+  if (completion?.state === 'error') {
+    return (
+      <div className="pair-success">
+        <p role="alert">{completion.message}</p>
+        <Button onClick={() => { setApproval(null); void run('pair', desktopApi.startPairing); }} loading={generating}>Tentar com um novo código</Button>
       </div>
     );
   }
@@ -94,12 +123,14 @@ function PairingContent({ status, run, isBusy, onDone }: { status: DesktopStatus
           </span>
         </li>
         <li>
-          <span>Digite o código ou leia o QR Code.</span>
+          <span>Escolha <strong>{status.pcName}</strong> no celular e digite o código, ou leia o QR Code.</span>
         </li>
         <li>
           <span>Permita o pedido aqui.</span>
         </li>
       </ol>
+
+      {address ? <p className="muted">Endereço deste PC: <span className="mono">{address}:{status.port}</span></p> : null}
 
       <div className="qr-stage">
         <div className="pair-code-block">
@@ -115,7 +146,7 @@ function PairingContent({ status, run, isBusy, onDone }: { status: DesktopStatus
               <span className="tabular">Expira em {formatCountdown(remaining)}</span>
             </span>
           ) : (
-            <span className="countdown is-expired">{generating ? 'Gerando código…' : 'Código expirado'}</span>
+            <span className="countdown is-expired">{generating ? 'Gerando código…' : status.pending.length > 0 ? 'Pedido recebido. Confirme abaixo.' : 'Código expirado'}</span>
           )}
         </div>
         <div className={active ? 'qr-frame' : 'qr-frame is-expired'}>
@@ -141,7 +172,7 @@ function PairingContent({ status, run, isBusy, onDone }: { status: DesktopStatus
               request={request}
               now={now}
               deciding={isBusy(`decide:${request.id}`)}
-              onDecide={approved => decide(request.id, request.deviceName, approved)}
+              onDecide={approved => decide(request, approved)}
             />
           ))}
         </section>
