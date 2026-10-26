@@ -222,7 +222,10 @@ impl ClipboardBackend for WindowsClipboard {
             }
             std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
             let _ = GlobalUnlock(global);
-            EmptyClipboard().map_err(|e| PlatformError::Internal(e.to_string()))?;
+            if let Err(e) = EmptyClipboard() {
+                let _ = GlobalFree(Some(global));
+                return Err(PlatformError::Internal(e.to_string()));
+            }
             if SetClipboardData(CF_UNICODETEXT.0 as u32, Some(HANDLE(global.0))).is_err() {
                 let _ = GlobalFree(Some(global));
                 return Err(PlatformError::ClipboardBusy);
@@ -308,9 +311,10 @@ impl ClipboardBackend for WindowsClipboard {
                 Err(_) => return,
             };
             OWNER.store(hwnd.0 as isize, Ordering::SeqCst);
-            if AddClipboardFormatListener(hwnd).is_err() {
-                return;
-            }
+            // Without the listener, keep the window alive anyway: writes open the
+            // clipboard with it, and returning would leave OWNER pointing at a
+            // destroyed window so every write failed until restart.
+            let _ = AddClipboardFormatListener(hwnd);
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
                 if msg.message == WM_CLIPBOARDUPDATE {

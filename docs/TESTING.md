@@ -2,6 +2,16 @@
 
 O código contém integrações nativas reais. Testes unitários não comprovam compatibilidade de cada player, permissões do Android nem continuidade durante suspensão. Este registro distingue execução automatizada, execução no Windows deste ambiente e validações pendentes em Android físico.
 
+## Release 0.6.9 — estabilidade e correções de ciclo de vida, 26/10/2026
+
+- `cargo +stable-x86_64-pc-windows-msvc test --manifest-path src-tauri/Cargo.toml --lib`: **124 passaram**, zero falhas, sete testes de hardware/fixture interativo ignorados. Inclui pareamento por código, código expirado após oito erros, nova contagem ao regenerar, tentativas sem convite, nomes de arquivo truncados e testes reais de parser PowerShell com apóstrofos tipográficos e texto que tentaria encerrar o literal.
+- Frontend: **45 testes Vitest passaram**. `scripts/test-network-installer.ps1`: **cinco cenários passaram**, mantendo cobertura de instalação, atualização, cancelamento, restrição e helper ausente sem modificar o firewall.
+- TypeScript, Vite e build Windows x64 de produção concluídos. Instalador NSIS: **4649137 bytes**, SHA-256 `bb1def1c78c39c8bdd5f7c08cf1cac69fbe1646118a18be6aae427e466530bf3`. `release:updater` verificou a assinatura e a versão assinada 0.6.9 e preparou os quatro arquivos de distribuição.
+- `cargo test --test updater -- --include-ignored --nocapture`, com `PCREMOTE_UPDATER_E2E_DIR` apontando aos artefatos 0.6.9: **seis passaram**, incluindo download e verificação do instalador real e descarte de uma cópia adulterada. O instalador não foi executado sobre a instalação pessoal.
+- A revisão independente encontrou um envio binário sem timeout após a remoção do limite geral de uma hora. O envio usa agora o helper limitado a 30 s; os dois fechamentos de WebSocket também têm prazo. A revisão da correção foi aceita, sem defeitos materiais restantes nos candidatos desktop/Android.
+- Não foram repetidos testes físicos de UAC/firewall, corte de energia durante gravação, clipboard do Windows, player travado ou sessão com mais de uma hora. Os testes automatizados e a revisão não certificam esses cenários físicos. Builds Linux não foram geradas nesta rodada.
+- Logs desta rodada em `artifacts/release-0.6.9/`. Semantica indisponível; evidências e decisões ficam no repositório e nos artefatos locais.
+
 ## Atualização 0.6.8 — permissões na instalação e atualização, 24/10/2026
 
 - Rust/MSVC `cargo test --lib`: **122 passaram**, zero falhas, sete smokes de hardware ignorados. Os dez testes de permissões incluem execução real do PowerShell com substitutos estritos em memória para NetSecurity: criação, repetição, escopo, falha intermediária mantendo a regra desabilitada, identidade conflitante e preservação de regras administrativas/políticas.

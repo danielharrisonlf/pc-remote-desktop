@@ -318,7 +318,12 @@ impl SystemBackend for WindowsSystem {
 
     fn save_secret_file(&self, path: &Path, bytes: &[u8]) -> Result<(), String> {
         let temp = path.with_extension("tmp");
-        fs::write(&temp, bytes).map_err(|e| e.to_string())?;
+        // Flush before the rename: after a power cut NTFS may keep the rename
+        // but not the data, and an empty identity would unpair every phone.
+        let mut file = fs::File::create(&temp).map_err(|e| e.to_string())?;
+        file.write_all(bytes).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        drop(file);
         fs::rename(&temp, path).map_err(|e| e.to_string())
     }
 
