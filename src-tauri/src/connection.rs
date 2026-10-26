@@ -34,6 +34,13 @@ use uuid::Uuid;
 
 type ServerSocket = WebSocketStream<tokio_rustls::server::TlsStream<tokio::net::TcpStream>>;
 
+/// The server pings every 30 s and phones answer on their own; three missed
+/// rounds mean the phone left the network without closing the socket.
+const CONTROL_SILENCE_LIMIT: Duration = Duration::from_secs(90);
+/// A peer that stops reading must not hold a connection slot forever.
+const SEND_TIMEOUT: Duration = Duration::from_secs(30);
+/// Recent request ids kept to refuse a repeated one without growing forever.
+const SEEN_IDS: usize = 4096;
 const FILE_BEGIN_TIMEOUT: Duration = Duration::from_secs(10);
 const FILE_IDLE_TIMEOUT: Duration = Duration::from_secs(20);
 const FILE_PROGRESS_STEP: u64 = 256 * 1024;
@@ -120,7 +127,15 @@ pub async fn serve(core: Arc<Core>, config: ServerConfig) -> Result<(), String> 
     core.set_service_running(true);
     let slots = Arc::new(Semaphore::new(16));
     loop {
-        let (stream, _) = listener.accept().await.map_err(|e| e.to_string())?;
+        // A peer resetting before accept, or a brief handle shortage, must not
+        // take the service down until the app restarts.
+        let stream = match listener.accept().await {
+            Ok((stream, _)) => stream,
+            Err(_) => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+        };
         let _ = stream.set_nodelay(true);
         let Ok(permit) = slots.clone().try_acquire_owned() else {
             continue;
@@ -129,16 +144,22 @@ pub async fn serve(core: Arc<Core>, config: ServerConfig) -> Result<(), String> 
         let acceptor = acceptor.clone();
         tokio::spawn(async move {
             let _permit = permit;
+            // No overall cap: the control socket lives as long as the phone answers
+            // pings, and file sockets keep their own idle and total deadlines.
             if let Ok(Ok(tls)) = timeout(Duration::from_secs(8), acceptor.accept(stream)).await {
-                let _ = timeout(Duration::from_secs(3600), handle(core, tls)).await;
+                let _ = handle(core, tls).await;
             }
         });
     }
 }
 
 async fn send(ws: &mut ServerSocket, v: Value) -> Result<(), String> {
-    ws.send(Message::Text(v.to_string().into()))
+    send_message(ws, Message::Text(v.to_string().into())).await
+}
+async fn send_message(ws: &mut ServerSocket, message: Message) -> Result<(), String> {
+    timeout(SEND_TIMEOUT, ws.send(message))
         .await
+        .map_err(|_| "send timeout".to_string())?
         .map_err(|e| e.to_string())
 }
 async fn error(ws: &mut ServerSocket, id: Uuid, code: &str) -> Result<(), String> {
@@ -244,6 +265,8 @@ async fn control(core: Arc<Core>, mut ws: ServerSocket, features: Features) -> R
     };
     let mut device: Option<Uuid> = None;
     let mut seen = std::collections::HashSet::<Uuid>::new();
+    let mut seen_order = std::collections::VecDeque::<Uuid>::new();
+    let mut last_rx = tokio::time::Instant::now();
     let mut events = core.events.subscribe();
     let connected_at = tokio::time::Instant::now();
     let first_deadline = connected_at + Duration::from_secs(10);
@@ -257,20 +280,27 @@ async fn control(core: Arc<Core>, mut ws: ServerSocket, features: Features) -> R
         tokio::select! {
             _=tokio::time::sleep_until(first_deadline),if device.is_none()&&!first_valid_message=>break,
             _=tokio::time::sleep_until(unauth_deadline),if device.is_none()=>break,
-            _=heartbeat.tick()=>{ws.send(Message::Ping(Vec::new().into())).await.map_err(|e|e.to_string())?;}
+            _=heartbeat.tick()=>{
+                if last_rx.elapsed()>=CONTROL_SILENCE_LIMIT{break;}
+                send_message(&mut ws,Message::Ping(Vec::new().into())).await?;
+            }
             incoming=ws.next()=>{
                 core.check_resume();
                 let Some(Ok(msg))=incoming else {break};
+                last_rx=tokio::time::Instant::now();
                 if msg.is_close(){break;}
-                if msg.is_ping(){ws.send(Message::Pong(msg.into_data())).await.map_err(|e|e.to_string())?;continue;}
+                if msg.is_ping(){send_message(&mut ws,Message::Pong(msg.into_data())).await?;continue;}
                 let Message::Text(raw)=msg else {continue};
                 if raw.len()>protocol::MAX_FRAME{let _=error(&mut ws,Uuid::nil(),"too_large").await;break;}
                 let parsed=serde_json::from_str::<ClientMessage>(&raw);
                 let msg=match parsed {Ok(m)=>m,Err(_)=>{error(&mut ws,Uuid::nil(),"invalid_message").await?;continue}};
                 let id=msg.id();
                 if msg.version()!=1{error(&mut ws,id,"version_mismatch").await?;continue;}
-                if id.is_nil()||seen.len()>=262_144{error(&mut ws,id,"invalid_message").await?;break;}
+                if id.is_nil(){error(&mut ws,id,"invalid_message").await?;break;}
                 if !seen.insert(id){error(&mut ws,id,"invalid_message").await?;continue;}
+                // Every pointer move has its own id; a hard cap ended long mouse sessions.
+                seen_order.push_back(id);
+                if seen_order.len()>SEEN_IDS{if let Some(old)=seen_order.pop_front(){seen.remove(&old);}}
                 match msg {
                     ClientMessage::PairRequest {device_id,device_name,code,..} if device.is_none()=>{
                         match core.pair_request(id,device_id,device_name.clone(),code){
@@ -292,11 +322,13 @@ async fn control(core: Arc<Core>, mut ws: ServerSocket, features: Features) -> R
                                             .unwrap_or_else(||tokio::time::Instant::now()+Duration::from_millis(10));
                                     },
                                     incoming=ws.next()=>match incoming{
-                                        Some(Ok(Message::Ping(payload)))=>ws.send(Message::Pong(payload)).await.map_err(|e|e.to_string())?,
+                                        Some(Ok(Message::Ping(payload)))=>send_message(&mut ws,Message::Pong(payload)).await?,
                                         Some(Ok(Message::Pong(_)))=>{},
                                         _=>return Ok(())
                                     }
                                 }};
+                                // No heartbeat runs while waiting for the user; do not count that wait as silence.
+                                last_rx=tokio::time::Instant::now();
                                 match outcome {
                                     ApprovalOutcome::Approved(grant) => match core.pair_complete(grant) {
                                         Ok((pc_id,token))=>{let status=core.status();send(&mut ws,json!({"v":1,"type":"pair.result","id":id,"pcId":pc_id,"pcName":status.pc_name,"token":token})).await?},
@@ -346,6 +378,8 @@ async fn control(core: Arc<Core>, mut ws: ServerSocket, features: Features) -> R
                         // Power changes publish their own snapshot, which then follows the ack.
                         let send_snapshot = !(action.is_input() || file || action.is_power() || matches!(&action, Action::SearchOpen { .. })) || matches!(&action, Action::InputEnable { .. });
                         let result=dispatch(core.clone(),device.unwrap(),cleanup.epoch,id,action).await;
+                        // The socket was not read while the action ran; that is not the phone's silence.
+                        last_rx=tokio::time::Instant::now();
                         match result {Ok(reply)=>{if let Some(reply)=reply {send(&mut ws,reply).await?;}if send_snapshot {send(&mut ws,serde_json::to_value(core.snapshot()).map_err(|e|e.to_string())?).await?;}send(&mut ws,protocol::ack(id)).await?},Err(code)=>reject(&mut ws,id,&code,wording).await?}
                     }
                     _=>{error(&mut ws,id,"unauthorized").await?;break;}

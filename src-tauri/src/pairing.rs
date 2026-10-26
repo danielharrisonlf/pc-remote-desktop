@@ -125,6 +125,7 @@ impl Core {
             ));
         }
         s.pair_generation = s.pair_generation.wrapping_add(1);
+        s.failed_pairs.clear();
         let code = format!("{:08}", rand::rng().random_range(0..100_000_000));
         s.addresses = addresses();
         let host = s
@@ -152,26 +153,22 @@ impl Core {
     ) -> Result<oneshot::Receiver<ApprovalOutcome>, &'static str> {
         let mut s = self.state.lock().unwrap();
         let now = Instant::now();
-        while s
-            .failed_pairs
-            .front()
-            .is_some_and(|t| now.duration_since(*t) > Duration::from_secs(120))
-        {
-            s.failed_pairs.pop_front();
-        }
-        if s.failed_pairs.len() >= 8 {
-            return Err("rate_limited");
-        }
+        // Only guesses against a live code count, and they count per code: a
+        // global lockout let anyone on the network block pairing before the
+        // user even opened the drawer, and a new code could not lift it.
         let Some((invitation, code_deadline)) = s.pairing.as_ref() else {
-            s.failed_pairs.push_back(now);
             return Err("pairing_expired");
         };
         if *code_deadline <= now {
-            s.failed_pairs.push_back(now);
             return Err("pairing_expired");
         }
         if invitation.code != code {
             s.failed_pairs.push_back(now);
+            if s.failed_pairs.len() >= 8 {
+                // Too many guesses burn the code; the PC shows it as expired.
+                s.pairing = None;
+                s.failed_pairs.clear();
+            }
             return Err("pairing_code_incorrect");
         }
         if id.is_nil()
@@ -451,8 +448,45 @@ mod tests {
                 "Phone".into(),
                 invitation.code,
             ),
-            Err("rate_limited")
+            Err("pairing_expired")
         ));
+        assert!(core.status().pairing.is_none());
+
+        // A new code starts with a clean count.
+        let invitation = core.start_pairing();
+        assert!(core
+            .pair_request(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                "Phone".into(),
+                invitation.code,
+            )
+            .is_ok());
+    }
+
+    #[test]
+    fn guesses_without_a_live_code_do_not_block_the_next_one() {
+        let core = test_core();
+        for _ in 0..16 {
+            assert!(matches!(
+                core.pair_request(
+                    Uuid::new_v4(),
+                    Uuid::new_v4(),
+                    "Phone".into(),
+                    "00000000".into(),
+                ),
+                Err("pairing_expired")
+            ));
+        }
+        let invitation = core.start_pairing();
+        assert!(core
+            .pair_request(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                "Phone".into(),
+                invitation.code,
+            )
+            .is_ok());
     }
 
     #[test]

@@ -885,7 +885,18 @@ $result = [pscustomobject]@{{ activeProfiles=$activeProfiles; profiles=$profiles
 
 #[cfg(windows)]
 fn ps_literal(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
+    // PowerShell also ends single-quoted strings at the typographic quotes
+    // U+2018..U+201B (a folder named "D’Ávila"); each one is doubled like '.
+    let mut literal = String::with_capacity(value.len() + 2);
+    literal.push('\'');
+    for c in value.chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            literal.push(c);
+        }
+        literal.push(c);
+    }
+    literal.push('\'');
+    literal
 }
 
 #[cfg(windows)]
@@ -973,6 +984,10 @@ mod tests {
         assert!(encode_powershell_utf16(&script).len() > 32_767);
         assert_eq!(run_powershell(&script).unwrap(), "permissões — São Paulo");
         assert!(run_powershell("throw 'expected test failure'").is_err());
+        for value in ["D'Ávila", "D’Ávila", "x’;throw 'injected';’", "‘‚‛"] {
+            let script = format!("[Console]::Out.Write({})", ps_literal(value));
+            assert_eq!(run_powershell(&script).unwrap(), value);
+        }
     }
 
     #[cfg(windows)]

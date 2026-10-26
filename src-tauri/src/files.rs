@@ -219,10 +219,16 @@ pub fn sanitize_name(raw: &str) -> SafeName {
     if is_reserved(&stem) {
         stem.insert(0, '_');
     }
-    SafeName {
-        stem: stem.chars().take(MAX_STEM_CHARS).collect(),
-        ext,
+    let mut stem: String = stem.chars().take(MAX_STEM_CHARS).collect();
+    if ext.is_empty() {
+        // Windows drops trailing spaces and dots, so the saved name would differ
+        // from the one reported to the phone.
+        stem.truncate(stem.trim_end_matches([' ', '.']).len());
+        if stem.is_empty() {
+            stem = "arquivo".to_string();
+        }
     }
+    SafeName { stem, ext }
 }
 
 /// Sanitizes the name and requires an allowed MIME type with a matching extension.
@@ -854,6 +860,18 @@ pub(crate) mod tests {
         assert_eq!(name(". . .png"), "png");
         assert_eq!(sanitize_name("sem extensão").ext, "");
         assert_eq!(name("a.b.c.PDF"), "a.b.c.pdf");
+    }
+
+    #[test]
+    fn truncation_never_leaves_a_name_windows_would_change() {
+        let safe = sanitize_name(&format!("{} b", "a".repeat(MAX_STEM_CHARS - 1)));
+        assert_eq!(safe.file_name(), "a".repeat(MAX_STEM_CHARS - 1));
+        // Before an extension the space is harmless and kept.
+        let safe = sanitize_name(&format!("{} b.pdf", "a".repeat(MAX_STEM_CHARS - 1)));
+        assert_eq!(
+            safe.file_name(),
+            format!("{} .pdf", "a".repeat(MAX_STEM_CHARS - 1))
+        );
     }
 
     #[test]

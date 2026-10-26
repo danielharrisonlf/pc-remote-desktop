@@ -67,7 +67,7 @@ function FileRow({ file }: { file: FileEntry }) {
           {file.name}
         </span>
         <span className="transfer-meta tabular">
-          {toPhone ? 'Enviado ao celular' : 'Recebido do celular'}, {formatBytes(file.bytes)}
+          {toPhone ? 'Enviado ao celular' : 'Recebido do celular'}, {formatBytes(file.bytes) || '0 B'}
         </span>
       </span>
       <time className="transfer-time tabular" dateTime={new Date(file.at).toISOString()}>
@@ -86,7 +86,7 @@ function ProgressRow({ label, name, done, total, waiting, onCancel }: { label: s
           {name}
         </span>
         <span className="incoming-meta tabular">
-          {waiting ? 'Aguardando o celular…' : `${formatBytes(done) || '0 B'} de ${formatBytes(total)}`}
+          {waiting ? 'Aguardando o celular…' : `${formatBytes(done) || '0 B'} de ${formatBytes(total) || '0 B'}`}
         </span>
         {onCancel ? (
           <Button variant="ghost" size="sm" icon={X} onClick={onCancel}>

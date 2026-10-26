@@ -30,7 +30,13 @@ pub fn configure_network_for_installer() -> i32 {
 }
 
 use crate::core::{Core, Pairing, Status};
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -261,6 +267,13 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let mut tick = tokio::time::interval(Duration::from_millis(650));
                 let mut shown: Option<String> = None;
+                let refreshing = Arc::new(AtomicBool::new(false));
+                struct RefreshDone(Arc<AtomicBool>);
+                impl Drop for RefreshDone {
+                    fn drop(&mut self) {
+                        self.0.store(false, Ordering::Release);
+                    }
+                }
                 loop {
                     tick.tick().await;
                     poll.check_resume();
@@ -274,8 +287,17 @@ pub fn run() {
                         let _ = cancel_power_item.set_enabled(label.is_some());
                         shown = label;
                     }
-                    let core = poll.clone();
-                    let _ = tokio::task::spawn_blocking(move || core.refresh()).await;
+                    // A player stuck in a WinRT call must not stall this loop: it runs
+                    // scheduled power actions and the outbox, and a stalled tick looks
+                    // like a resume from sleep that drops the phone. Skip while one runs.
+                    if !refreshing.swap(true, Ordering::AcqRel) {
+                        let core = poll.clone();
+                        let done = RefreshDone(refreshing.clone());
+                        tokio::task::spawn_blocking(move || {
+                            let _done = done;
+                            core.refresh();
+                        });
+                    }
                 }
             });
             Ok(())
