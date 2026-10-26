@@ -390,7 +390,7 @@ async fn control(core: Arc<Core>, mut ws: ServerSocket, features: Features) -> R
             }
         }
     }
-    let _ = ws.close(None).await;
+    let _ = timeout(SEND_TIMEOUT, ws.close(None)).await;
     let _ = timeout(Duration::from_millis(250), async {
         while let Some(Ok(message)) = ws.next().await {
             if message.is_close() {
@@ -508,7 +508,7 @@ async fn close_file_socket_with(
         code: CloseCode::Normal,
         reason: Utf8Bytes::from_static(""),
     });
-    let _ = ws.close(frame).await;
+    let _ = timeout(SEND_TIMEOUT, ws.close(frame)).await;
     let _ = timeout(Duration::from_millis(250), async {
         while let Some(Ok(message)) = ws.next().await {
             if message.is_close() {
@@ -900,7 +900,7 @@ async fn stream_file(
             chunk = chunks.recv(), if room => match chunk {
                 Some(chunk) => {
                     sent += chunk.len() as u64;
-                    if ws.send(Message::Binary(chunk)).await.is_err() {return Err(SendAbort::closed());}
+                    if send_message(ws, Message::Binary(chunk)).await.is_err() {return Err(SendAbort::closed());}
                 }
                 // The reader dropped its sender: everything was read, or it failed.
                 None => match (&mut reader).await {
